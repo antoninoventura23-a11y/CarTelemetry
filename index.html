@@ -128,7 +128,7 @@
           <option value="GENERIC_OBD">OBD2 Generico Standard</option>
         </select>
         <button id="btn-scan-cluster" class="bg-slate-800 hover:bg-slate-700 text-amber-400 px-2 py-1 rounded-xl text-xs font-mono" title="Cerca DID sulla centralina strumenti (0x17), sola lettura">SCAN 0x17</button>
-        <button id="btn-scan-blocks" class="bg-slate-800 hover:bg-slate-700 text-amber-400 px-2 py-1 rounded-xl text-xs font-mono" title="Cerca blocchi di misura (servizio 0x21) su motore e strumenti, sola lettura">BLOCCHI 0x21</button>
+        <button id="btn-scan-engine" class="bg-slate-800 hover:bg-slate-700 text-amber-400 px-2 py-1 rounded-xl text-xs font-mono" title="Cerca DID sulla centralina motore (7E0), sola lettura">SCAN MOTORE</button>
         <button id="btn-export-log" class="bg-slate-800 hover:bg-slate-700 text-emerald-400 px-2 py-1 rounded-xl text-xs font-mono" title="Scarica il log come file di testo">EXPORT</button>
         <button id="btn-toggle-log" class="bg-slate-800 hover:bg-slate-700 text-slate-400 px-2 py-1 rounded-xl text-xs font-mono">
           LOG
@@ -1018,9 +1018,9 @@
       if (isConnected) startPolling();
     }
 
-    // Scansione blocchi di misura (servizio 0x21, sola lettura) su motore 7E0 e strumenti 0x17.
-    // Registra nel LOG ogni blocco che risponde. Il significato dei valori va poi confrontato con un tool noto.
-    async function scanMeasuringBlocks() {
+    // Scansione DID della centralina motore (7E0), sola lettura (servizio 0x22).
+    // Registra nel LOG ogni DID che risponde con dati validi.
+    async function scanEngineDids() {
       if (!isConnected || isSimulationMode) {
         showToast('Scansione non disponibile', 'Collegati al veicolo (non in SIM).', 'warn');
         return;
@@ -1029,21 +1029,25 @@
       scanning = true;
       await new Promise(r => setTimeout(r, 2500));
 
-      log('SCAN blocchi di misura 0x21: motore (7E0) e strumenti (0x17)', 'warn');
+      const ranges = [[0x0200, 0x02FF], [0x1000, 0x12FF]];
+      log('SCAN motore 7E0: DID 0x0200-0x02FF e 0x1000-0x12FF (sola lettura)', 'warn');
       let found = 0;
       try {
-        for (const mod of ['engine', 'cluster']) {
-          await selectModule(mod, true);
-          log(`-- modulo ${mod === 'engine' ? 'motore 7E0' : 'strumenti 0x17'}`, 'warn');
-          for (let g = 1; g <= 255; g++) {
-            const hex = g.toString(16).toUpperCase().padStart(2, '0');
-            const raw = await sendObdCommand(`21 ${hex}`, 700, true);
-            const bytes = extractHexBytes(raw, null);
-            const idx = bytes.findIndex((b, i) => b === 0x61 && bytes[i + 1] === g);
-            if (idx !== -1) {
-              const data = bytes.slice(idx + 2).map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
-              log(`BLOCCO 21 ${hex} (${mod}) -> ${data || '(vuoto)'}`, 'rx');
-              found++;
+        await selectModule('engine', true);
+        for (const [fromDid, toDid] of ranges) {
+          for (let did = fromDid; did <= toDid; did++) {
+            const hiByte = (did >> 8) & 0xFF;
+            const loByte = did & 0xFF;
+            const hexDid = hiByte.toString(16).toUpperCase().padStart(2, '0') + loByte.toString(16).toUpperCase().padStart(2, '0');
+            const raw = await sendObdCommand(`22 ${hexDid.slice(0, 2)} ${hexDid.slice(2, 4)}`, 500, true);
+            const bytes = extractHexBytes(raw, '62');
+            for (let i = 0; i <= bytes.length - 3; i++) {
+              if (bytes[i] === 0x62 && bytes[i + 1] === hiByte && bytes[i + 2] === loByte) {
+                const data = bytes.slice(i + 3).map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
+                log(`DID ${hexDid} (motore) -> ${data || '(vuoto)'}`, 'rx');
+                found++;
+                break;
+              }
             }
           }
         }
@@ -1052,8 +1056,8 @@
         scanning = false;
       }
 
-      log(`SCAN blocchi completata: ${found} risposte`, 'warn');
-      showToast('Scansione blocchi completata', `${found} risposte (vedi LOG)`, 'success');
+      log(`SCAN motore completata: ${found} DID con risposta`, 'warn');
+      showToast('Scansione motore completata', `${found} DID con risposta (vedi LOG)`, 'success');
       if (isConnected) startPolling();
     }
 
@@ -1215,7 +1219,7 @@
       });
 
       document.getElementById('btn-scan-cluster').addEventListener('click', () => scanClusterDids());
-      document.getElementById('btn-scan-blocks').addEventListener('click', () => scanMeasuringBlocks());
+      document.getElementById('btn-scan-engine').addEventListener('click', () => scanEngineDids());
       document.getElementById('btn-export-log').addEventListener('click', exportLog);
 
       document.getElementById('btn-toggle-log').addEventListener('click', () => {
