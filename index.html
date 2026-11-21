@@ -430,7 +430,7 @@
       el.className = type === 'tx' ? 'text-cyan-400' : type === 'rx' ? 'text-emerald-400' : type === 'warn' ? 'text-amber-400' : type === 'error' ? 'text-red-400' : 'text-slate-400';
       el.innerHTML = `<span class="text-slate-600">[${time}]</span> ${msg}`;
       consoleLogBox.appendChild(el);
-      while (consoleLogBox.children.length > 3000) {
+      while (consoleLogBox.children.length > 10000) {
         consoleLogBox.removeChild(consoleLogBox.firstChild);
       }
       consoleLogBox.scrollTop = consoleLogBox.scrollHeight;
