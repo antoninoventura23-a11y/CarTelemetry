@@ -608,37 +608,50 @@
       if (!rawResponse) return [];
       if (/NO DATA|ERROR|STOPPED|UNABLE TO CONNECT|\?/i.test(rawResponse)) return [];
 
-      const lines = rawResponse.split(/[\r\n]+/).map(l => l.trim()).filter(Boolean);
-      const bytes = [];
+      // Normalizza la risposta in una sequenza di coppie hex (gestisce sia risposte con spazi che senza spazi)
+      const compactHex = rawResponse
+        .replace(/>/g, ' ')
+        .replace(/[^0-9A-Fa-f]/g, ' ')
+        .trim();
 
-      for (const line of lines) {
-        const tokens = line.replace(/[^0-9A-Fa-f\s]/g, ' ').trim().split(/\s+/).filter(t => /^[0-9A-Fa-f]{2}$/.test(t));
-        if (tokens.length === 0) continue;
+      if (!compactHex) return [];
 
-        if (expectedHeaderPrefix) {
-          const idx = tokens.findIndex(t => t.toUpperCase() === expectedHeaderPrefix.toUpperCase());
-          if (idx !== -1) {
-            for (let i = idx; i < tokens.length; i++) {
-              bytes.push(parseInt(tokens[i], 16));
-            }
+      // Estrae coppie hex anche se incollate (es. "03410575" -> ["03","41","05","75"])
+      const tokens = [];
+      for (const part of compactHex.split(/\s+/)) {
+        if (!part) continue;
+        if (part.length % 2 === 0) {
+          for (let i = 0; i < part.length; i += 2) {
+            tokens.push(part.slice(i, i + 2).toUpperCase());
           }
-        } else {
-          for (const t of tokens) {
-            bytes.push(parseInt(t, 16));
-          }
+        } else if (/^[0-9A-Fa-f]{2}$/.test(part)) {
+          tokens.push(part.toUpperCase());
         }
       }
-      return bytes;
+
+      if (tokens.length === 0) return [];
+
+      if (expectedHeaderPrefix) {
+        const target = expectedHeaderPrefix.toUpperCase();
+        const idx = tokens.findIndex(t => t === target);
+        if (idx !== -1) {
+          return tokens.slice(idx).map(h => parseInt(h, 16));
+        }
+        return [];
+      }
+
+      return tokens.map(h => parseInt(h, 16));
     }
 
-    // Decodifica VIN da risposta Mode 09 PID 02
+    // Decodifica VIN da risposta Mode 09 PID 02 (supporta ISO-TP multi-frame ELM327)
     function parseVinResponse(raw) {
       if (!raw || /NO DATA|ERROR|\?/i.test(raw)) return '';
-      const hexPairs = raw.match(/\b[0-9A-Fa-f]{2}\b/g) || [];
+      const bytes = extractHexBytes(raw, null);
+      if (bytes.length === 0) return '';
+
       let ascii = '';
-      for (const h of hexPairs) {
-        const code = parseInt(h, 16);
-        if (code >= 48 && code <= 90) { // A-Z, 0-9
+      for (const code of bytes) {
+        if ((code >= 48 && code <= 57) || (code >= 65 && code <= 90)) {
           ascii += String.fromCharCode(code);
         }
       }
@@ -652,9 +665,9 @@
       await sendObdCommand('AT Z', 2500);
       await sendObdCommand('AT E0', 1200);
       await sendObdCommand('AT L0', 1200);
-      await sendObdCommand('AT S0', 1200);
+      await sendObdCommand('AT S1', 1200);
       await sendObdCommand('AT SP 0', 1500);
-      await sendObdCommand('AT H1', 1200);
+      await sendObdCommand('AT H0', 1200);
 
       // Prova a leggere il VIN (09 02)
       const vinRaw = await sendObdCommand('09 02', 2500);
@@ -721,12 +734,21 @@
           telemetry.dpfRegenActive = regenBytes[3] > 0;
         }
 
+        // Temperatura gas di scarico DPF (es. 22 11 50)
+        const exRaw = await sendObdCommand('22 11 50', 2000);
+        const exBytes = extractHexBytes(exRaw, '62');
+        if (exBytes.length >= 5 && exBytes[1] === 0x11 && exBytes[2] === 0x50) {
+          const rawEx = (exBytes[3] << 8) + exBytes[4];
+          telemetry.exhaustTemp = Number((rawEx * 0.1 - 273.15).toFixed(1));
+        }
+
         // Livello olio mm (es. 22 20 2F)
         const oilLvlRaw = await sendObdCommand('22 20 2F', 2000);
         const oilLvlBytes = extractHexBytes(oilLvlRaw, '62');
         if (oilLvlBytes.length >= 5 && oilLvlBytes[1] === 0x20 && oilLvlBytes[2] === 0x2F) {
           const rawMm = (oilLvlBytes[3] << 8) + oilLvlBytes[4];
           telemetry.oilLevelMm = Number((rawMm * 0.1).toFixed(1));
+          telemetry.oilLevelLiters = Number((3.8 + ((telemetry.oilLevelMm - 35) * 0.04)).toFixed(1));
         }
 
         // Vita residua olio % (es. 22 02 A4)
