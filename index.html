@@ -1,442 +1,577 @@
 <!DOCTYPE html>
-<html lang="it">
+<html lang="it" class="h-full bg-slate-950 text-slate-100">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CliniClick BPMN - Presentazione Progetto Dimissioni</title>
-    <!-- Tailwind CSS CDN -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- FontAwesome -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Google Font Inter -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <!-- Mermaid.js per i Diagrammi -->
-    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>VAG Telemetry PRO - OBD2 Smartphone Dashboard</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Google Fonts: Orbitron & Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Orbitron:wght@600;800;900&display=swap" rel="stylesheet">
+  
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      touch-action: manipulation;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .font-orbitron {
+      font-family: 'Orbitron', monospace;
+    }
+    /* Dynamic High-Visibility Glow Effects for Mobile Sunlight */
+    .glow-cyan { box-shadow: 0 0 15px rgba(6, 182, 212, 0.4); border-color: rgba(6, 182, 212, 0.7); }
+    .glow-orange { box-shadow: 0 0 25px rgba(249, 115, 22, 0.6); border-color: rgba(249, 115, 22, 0.9); }
+    .glow-red { box-shadow: 0 0 25px rgba(239, 68, 68, 0.6); border-color: rgba(239, 68, 68, 0.9); }
     
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    fontFamily: { sans: ['Inter', 'sans-serif'] }
-                }
-            }
-        };
-        mermaid.initialize({
-            startOnLoad: true,
-            theme: 'dark',
-            securityLevel: 'loose',
-            flowchart: { curve: 'basis' }
-        });
-    </script>
-    <style>
-        ::-webkit-scrollbar { width: 8px; height: 8px; }
-        ::-webkit-scrollbar-track { background: #0f172a; }
-        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: #475569; }
-        .mermaid { display: flex; justify-content: center; }
-    </style>
+    .bg-grid {
+      background-size: 24px 24px;
+      background-image: linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+                        linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+    }
+
+    @keyframes pulse-regen {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.85; transform: scale(0.99); }
+    }
+    .animate-regen {
+      animation: pulse-regen 1s infinite ease-in-out;
+    }
+
+    .gauge-circle {
+      transition: stroke-dashoffset 0.4s cubic-bezier(0.4, 0, 0.2, 1), stroke 0.3s ease;
+    }
+  </style>
 </head>
-<body class="bg-slate-950 text-slate-100 font-sans antialiased min-h-screen flex flex-col">
+<body class="h-full bg-slate-950 text-slate-100 bg-grid overflow-x-hidden flex flex-col justify-between">
 
-    <!-- HEADER -->
-    <header class="bg-slate-900 text-white border-b border-slate-800 sticky top-0 z-50 shadow-xl">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-            <div class="flex items-center space-x-3">
-                <div class="bg-gradient-to-tr from-sky-500 to-purple-600 p-2 rounded-xl shadow-lg">
-                    <i class="fa-solid fa-hospital-user text-white text-xl"></i>
-                </div>
-                <div>
-                    <h1 class="font-bold text-base sm:text-lg leading-tight flex items-center gap-2">
-                        CliniClick BPM <span class="bg-sky-500/20 text-sky-400 text-xs px-2.5 py-0.5 rounded-full font-medium border border-sky-500/30">Workflow Dimissioni Unificato</span>
-                    </h1>
-                    <p class="text-xs text-slate-400">Specifica Tecnica e Funzionale per la Riunione Interna</p>
-                </div>
-            </div>
-            
-            <div class="flex items-center gap-2">
-                <button onclick="openXmlModal()" class="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-sky-300 px-3.5 py-2 rounded-lg text-xs font-semibold border border-slate-700 transition shadow">
-                    <i class="fa-solid fa-code"></i>
-                    <span class="hidden sm:inline">Esporta BPMN XML</span>
-                </button>
-            </div>
+  <!-- Header Bar per Smartphone -->
+  <header class="w-full bg-slate-900/95 border-b border-slate-800 backdrop-blur-md sticky top-0 z-50 px-3 py-2.5 flex items-center justify-between">
+    <div class="flex items-center gap-2.5">
+      <div class="h-9 w-9 rounded-xl bg-cyan-950 border border-cyan-500/50 flex items-center justify-center text-cyan-400 glow-cyan">
+        <i class="fa-solid fa-gauge-high text-lg"></i>
+      </div>
+      <div>
+        <h1 class="text-sm sm:text-base font-extrabold font-orbitron tracking-wider text-cyan-400 leading-none">
+          TELEMETRY T-ROC JESSY/ANTO
+        </h1>
+        <div class="text-[10px] font-mono text-slate-400 flex items-center gap-1.5 mt-0.5">
+          <span id="ble-status-dot" class="w-2 h-2 rounded-full bg-slate-600"></span>
+          <span id="ble-status-text" class="uppercase">DISCONNESSO</span>
         </div>
-    </header>
-
-    <!-- MAIN CONTENT -->
-    <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
-
-        <!-- TABS NAVIGAZIONE -->
-        <div class="flex flex-col sm:flex-row items-center justify-between gap-4 bg-slate-900/90 p-3 rounded-xl border border-slate-800">
-            <div class="flex rounded-lg bg-slate-950 p-1 space-x-1 border border-slate-800 w-full sm:w-auto">
-                <button id="tab-flowchart-btn" onclick="switchView('flowchart')" class="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2 text-xs font-bold rounded-md transition bg-sky-600 text-white shadow">
-                    <i class="fa-solid fa-diagram-next"></i> Flowchart BPMN 2.0
-                </button>
-                <button id="tab-swimlane-btn" onclick="switchView('swimlane')" class="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2 text-xs font-bold rounded-md transition text-slate-400 hover:text-white">
-                    <i class="fa-solid fa-layer-group"></i> Swimlane (A Corsie)
-                </button>
-                <button id="tab-matrix-btn" onclick="switchView('matrix')" class="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2 text-xs font-bold rounded-md transition text-slate-400 hover:text-white">
-                    <i class="fa-solid fa-table-list"></i> Matrice Comparativa
-                </button>
-            </div>
-
-            <div class="flex items-center gap-3 text-xs bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800">
-                <span class="text-slate-400 font-medium">Ingressi UI:</span>
-                <span class="flex items-center gap-1.5 text-sky-400 font-semibold"><i class="fa-solid fa-house-user"></i> Dimetti / ADT</span>
-                <span class="text-slate-600">|</span>
-                <span class="flex items-center gap-1.5 text-purple-400 font-semibold"><i class="fa-solid fa-truck-medical"></i> Dimissione Protetta</span>
-            </div>
-        </div>
-
-        <!-- VISTA 1: FLOWCHART -->
-        <section id="view-flowchart" class="bg-slate-900 rounded-2xl p-6 shadow-2xl border border-slate-800 overflow-x-auto space-y-4">
-            <div class="border-b border-slate-800 pb-3 flex justify-between items-center">
-                <div>
-                    <h2 class="text-base font-bold text-sky-400 flex items-center gap-2">
-                        <i class="fa-solid fa-diagram-next"></i> Diagramma di Flusso Integrato
-                    </h2>
-                    <p class="text-xs text-slate-400">Dimissione Ordinaria (Parziale, Avviso Verbale, 2ª Firma e CDR) vs Dimissione Protetta (UVM e Creazione Ricovero OdC).</p>
-                </div>
-            </div>
-
-            <!-- MERMAID FLOWCHART -->
-            <div class="mermaid py-4 overflow-x-auto">
-flowchart TD
-    subgraph INGRESSI ["Punti di Ingresso UI (CliniClick)"]
-        Start_Ord["Pulsante 'Dimetti' / Gestione ADT"]
-        Start_Prot["Pulsante 'Dimissione Protetta' (Frontespizio)"]
-    end
-
-    Start_Ord --> CheckCCE["Check Moduli CCE Obbligatori"]
-    Start_Prot --> CheckCCE
-
-    CheckCCE --> GwMod{"Tutti i moduli CCE OK?"}
-    GwMod -- No --> FixMod["User Task: Completa Moduli Incompleti"]
-    FixMod --> CheckCCE
-
-    GwMod -- Si --> Bivio{"Seleziona Tipo di Dimissione"}
-
-    %% RAMO ORDINARIO
-    Bivio -- Ordinaria --> LetteraOrd["Redazione Lettera Dimissione Ospedaliera"]
-    LetteraOrd --> Firma1Ord["1a Firma Digitale (Medico)"]
-    Firma1Ord --> PCTOrd["Compilazione Primo Ciclo Terapeutico (PCT)"]
-    PCTOrd --> ParzialeOrd(["FINE DIMISSIONE PARZIALE"])
-    
-    ParzialeOrd --> ClickArchivia["Click Pulsante Archivia"]
-    ClickArchivia --> CheckVerbale{"Controllo Presenza Verbale Operatorio"}
-    
-    CheckVerbale -- Verbale OK / Non Operato --> ArchiviaOrd["Archiviazione Cartella Clinica"]
-    CheckVerbale -- Verbale in Bozza / Mancante --> ChoiceVerb{"Scegli: Continuare comunque?"}
-    
-    ChoiceVerb -- Si --> ArchiviaOrd
-    ChoiceVerb -- No --> FixVerb["Attesa Validazione Verbale"]
-    FixVerb --> ClickArchivia
-
-    ArchiviaOrd --> Firma2Ord["2a Firma Digitale (Primario)"]
-    Firma2Ord --> SyncCDR["Sync automatico Repository CDR Aziendale"]
-    SyncCDR --> EndOrd(["Fine: Cartella Archiviata nel CDR"])
-
-    %% RAMO PROTETTO
-    Bivio -- Protetta --> UVM["Compilazione Scheda UVM / PAI"]
-    UVM --> COT["External API: Inoltro Richiesta a COT Territoriale"]
-    COT --> GwCOT{"Posto OdC Confermato?"}
-    GwCOT -- No --> Reval["Rivalutazione Clinica / ADI"]
-    Reval --> UVM
-    GwCOT -- Si --> OdCCreate["Creazione e Trasmissione Ricovero in OdC"]
-    OdCCreate --> EndProt(["Fine: Paziente Trasferito e Ricovero OdC Creato"])
-
-    style Start_Ord fill:#0284c7,stroke:#0369a1,color:#fff
-    style Start_Prot fill:#9333ea,stroke:#7e22ce,color:#fff
-    style End_Ord fill:#ef4444,stroke:#dc2626,color:#fff
-    style EndProt fill:#ef4444,stroke:#dc2626,color:#fff
-    style GwMod fill:#f59e0b,stroke:#d97706,color:#fff
-    style Bivio fill:#334155,stroke:#1e293b,color:#fff
-    style GwCOT fill:#f59e0b,stroke:#d97706,color:#fff
-    style ParzialeOrd fill:#059669,stroke:#047857,color:#fff
-    style CheckVerbale fill:#f59e0b,stroke:#d97706,color:#fff
-    style ChoiceVerb fill:#f59e0b,stroke:#d97706,color:#fff
-    style Firma1Ord fill:#a855f7,stroke:#7e22ce,color:#fff
-    style Firma2Ord fill:#a855f7,stroke:#7e22ce,color:#fff
-    style PCTOrd fill:#2563eb,stroke:#1d4ed8,color:#fff
-    style OdCCreate fill:#9333ea,stroke:#7e22ce,color:#fff
-            </div>
-        </section>
-
-        <!-- VISTA 2: SWIMLANE -->
-        <section id="view-swimlane" class="bg-slate-900 rounded-2xl p-6 shadow-2xl border border-slate-800 overflow-x-auto space-y-4 hidden">
-            <div class="border-b border-slate-800 pb-3 flex justify-between items-center">
-                <div>
-                    <h2 class="text-base font-bold text-purple-400 flex items-center gap-2">
-                        <i class="fa-solid fa-layer-group"></i> Sequenza Temporale e Attori
-                    </h2>
-                    <p class="text-xs text-slate-400">Ruoli e interazioni: Medico, Primario, CliniClick CCE, COT e CDR Repository.</p>
-                </div>
-            </div>
-
-            <!-- MERMAID SEQUENCE -->
-            <div class="mermaid py-4 overflow-x-auto">
-sequenceDiagram
-    autonumber
-    actor Medico as Medico / Reparto
-    actor Primario as Primario / Responsabile
-    participant CCE as CliniClick CCE
-    participant COT as COT / Ospedale Comunità
-    participant CDR as CDR Repository Aziendale
-
-    alt Innesco Ordinario
-        Medico->>CCE: Click su "Dimetti" o Gestione ADT
-    else Innesco Protetto
-        Medico->>CCE: Click su "Dimissione Protetta" (Frontespizio)
-    end
-
-    CCE->>CCE: Check Moduli CCE Obbligatori
-    alt Moduli Incompleti
-        CCE-->>Medico: Blocco: Completa Moduli Mancanti
-    else Moduli OK
-        alt Percorso Ordinario
-            Medico->>CCE: Redazione Lettera di Dimissione Ospedaliera
-            Medico->>CCE: 1a Firma Digitale (Medico)
-            Medico->>CCE: Compilazione Primo Ciclo Terapeutico (PCT)
-            Note over Medico, CCE: CONCLUSIONE DIMISSIONE PARZIALE
-            
-            Medico->>CCE: Click su Pulsante Archivia
-            CCE->>CCE: Controllo Presenza Verbale Operatorio
-            alt Verbale Mancante / In Bozza
-                CCE-->>Medico: Warning: Verbale non validato. Scegli se proseguire
-                Note over Medico, CCE: L'utente sceglie di continuare
-            end
-            CCE->>CCE: Archiviazione Cartella
-            Primario->>CCE: 2a Firma Digitale (Archiviazione Primario)
-            CCE->>CDR: Sync automatico e Conservazione CDR Aziendale
-        else Percorso Protetto
-            Medico->>CCE: Compilazione Scheda UVM / PAI
-            CCE->>COT: Inoltro API Richiesta a COT Territoriale
-            COT-->>CCE: Posto OdC Confermato
-            CCE->>COT: Trasmissione Dati & Creazione Ricovero in Ospedale di Comunità
-            Note over CCE, CDR: NO Firma Digitale - NO PCT - NO Sync CDR
-        end
-    end
-            </div>
-        </section>
-
-        <!-- VISTA 3: MATRICE COMPARATIVA (EXECUTIVE SUMMARY FOR MEETING) -->
-        <section id="view-matrix" class="bg-slate-900 rounded-2xl p-6 shadow-2xl border border-slate-800 space-y-4 hidden">
-            <div class="border-b border-slate-800 pb-3 flex justify-between items-center">
-                <div>
-                    <h2 class="text-base font-bold text-emerald-400 flex items-center gap-2">
-                        <i class="fa-solid fa-table-list"></i> Matrice Comparativa di Dettaglio Funzionale
-                    </h2>
-                    <p class="text-xs text-slate-400">Prospetto sintetico utile per la presentazione al team di progetto.</p>
-                </div>
-            </div>
-
-            <div class="overflow-x-auto">
-                <table class="w-full text-left text-xs border-collapse">
-                    <thead>
-                        <tr class="bg-slate-950 text-slate-300 border-b border-slate-800 font-bold uppercase">
-                            <th class="p-3">Fase / Funzionalità</th>
-                            <th class="p-3 text-sky-400">🏠 Dimissione Ordinaria</th>
-                            <th class="p-3 text-purple-400">🏥 Dimissione Protetta (OdC)</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-slate-800/60 text-slate-300">
-                        <tr class="hover:bg-slate-800/30">
-                            <td class="p-3 font-semibold text-white">Punto di Avvio UI</td>
-                            <td class="p-3">Pulsante "Dimetti" (Frontespizio) o Menu "Gestione ADT"</td>
-                            <td class="p-3">Pulsante dedicato "Dimissione Protetta" (Frontespizio)</td>
-                        </tr>
-                        <tr class="hover:bg-slate-800/30">
-                            <td class="p-3 font-semibold text-white">Check Moduli CCE</td>
-                            <td class="p-3"><span class="bg-red-950 text-red-300 border border-red-800 px-2 py-0.5 rounded font-mono">BLOCCANTE</span> (Deve essere tutto completo)</td>
-                            <td class="p-3"><span class="bg-red-950 text-red-300 border border-red-800 px-2 py-0.5 rounded font-mono">BLOCCANTE</span> (Deve essere tutto completo)</td>
-                        </tr>
-                        <tr class="hover:bg-slate-800/30">
-                            <td class="p-3 font-semibold text-white">Documentazione Clinica</td>
-                            <td class="p-3">Lettera di Dimissione Ospedaliera + Primo Ciclo Terapeutico (PCT)</td>
-                            <td class="p-3">Scheda UVM / PAI + Valutazione COT</td>
-                        </tr>
-                        <tr class="hover:bg-slate-800/30">
-                            <td class="p-3 font-semibold text-white">Gestione Firme Digitale</td>
-                            <td class="p-3 font-semibold text-sky-300">Doppia Firma (1a Firma Medico + 2a Firma Primario su Archiviazione)</td>
-                            <td class="p-3 text-slate-500 italic">Nessuna Firma Digitale richiesta nel percorso</td>
-                        </tr>
-                        <tr class="hover:bg-slate-800/30">
-                            <td class="p-3 font-semibold text-white">Controllo Verbale Operatorio</td>
-                            <td class="p-3"><span class="bg-amber-950 text-amber-300 border border-amber-800 px-2 py-0.5 rounded font-mono">WARNING NON-BLOCCANTE</span> (Al click su Archivia con opzione di scelta)</td>
-                            <td class="p-3 text-slate-500 italic">Non previsto nel ramo protetto</td>
-                        </tr>
-                        <tr class="hover:bg-slate-800/30">
-                            <td class="p-3 font-semibold text-white">Primo Ciclo Terapeutico (PCT)</td>
-                            <td class="p-3 text-emerald-400 font-semibold"><i class="fa-solid fa-check mr-1"></i> Presente (Conclude la Dimissione Parziale)</td>
-                            <td class="p-3 text-slate-500 italic">Non presente</td>
-                        </tr>
-                        <tr class="hover:bg-slate-800/30">
-                            <td class="p-3 font-semibold text-white">Destinazione e Chiusura</td>
-                            <td class="p-3">Archiviazione Cartella e <strong>Sync con CDR Aziendale</strong></td>
-                            <td class="p-3 text-purple-300 font-semibold">Trasmissione dati e <strong>Creazione Ricovero in OdC</strong> (NO CDR)</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </section>
-
-        <!-- SIMULATORE INTERATTIVO INTERFACCIA CLINICLICK -->
-        <section class="bg-slate-900 rounded-2xl p-6 shadow-2xl border border-slate-800 space-y-4">
-            <h3 class="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2 border-b border-slate-800 pb-3">
-                <i class="fa-solid fa-laptop-medical text-sky-400"></i> Simulatore Interattivo Pulsantiera CliniClick
-            </h3>
-            
-            <p class="text-xs text-slate-400">Fai clic sui pulsanti per simulare i messaggi e il comportamento del software di cartella clinica durante la riunione:</p>
-
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
-                    <span class="text-xs font-bold text-sky-400 block">Pulsantiera Frontespizio / ADT</span>
-                    <div class="flex flex-wrap gap-2">
-                        <button onclick="simulaAzione('dimetti')" class="bg-sky-600 hover:bg-sky-500 text-white text-xs px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 shadow">
-                            <i class="fa-solid fa-house-user"></i> Pulsante "Dimetti"
-                        </button>
-                        <button onclick="simulaAzione('protetta')" class="bg-purple-600 hover:bg-purple-500 text-white text-xs px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 shadow">
-                            <i class="fa-solid fa-truck-medical"></i> Pulsante "Dimissione Protetta"
-                        </button>
-                        <button onclick="simulaAzione('archivia')" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 shadow">
-                            <i class="fa-solid fa-box-archive"></i> Pulsante "Archivia"
-                        </button>
-                    </div>
-                </div>
-
-                <!-- BOX RISPOSTA SIMULATORE -->
-                <div id="sim-response-box" class="bg-slate-950 p-4 rounded-xl border border-slate-800 flex items-center justify-center text-xs text-slate-400 italic text-center min-h-[90px]">
-                    Seleziona un'azione della pulsantiera sopra per vedere l'esito...
-                </div>
-            </div>
-        </section>
-
-    </main>
-
-    <!-- MODALE EXPORT XML BPMN 2.0 -->
-    <div id="xml-modal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
-        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-3xl w-full text-white overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
-            <div class="p-4 border-b border-slate-800 flex items-center justify-between">
-                <h3 class="font-bold text-sky-400 flex items-center gap-2 text-sm">
-                    <i class="fa-solid fa-code"></i> Codice Schema XML BPMN 2.0
-                </h3>
-                <button onclick="closeXmlModal()" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
-            </div>
-            <div class="p-4 flex-1 overflow-y-auto">
-                <textarea id="bpmn-xml-code" readonly class="w-full h-80 bg-slate-950 font-mono text-xs text-sky-300 p-4 rounded-lg border border-slate-800 focus:outline-none focus:ring-1 focus:ring-sky-500 resize-none">
-<?xml version="1.0" encoding="UTF-8"?>
-<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
-                  xmlns:camunda="http://camunda.org/schema/1.0/bpmn"
-                  id="Definitions_CliniClick_Master"
-                  targetNamespace="http://bpmn.io/schema/bpmn">
-  <bpmn:process id="Process_Dimissione_Unificata" name="Processo Dimissione CliniClick" isExecutable="true">
-    <bpmn:startEvent id="Start_Ord" name="Pulsante Dimetti / Gestione ADT"/>
-    <bpmn:startEvent id="Start_Prot" name="Pulsante Dimissione Protetta (Frontespizio)"/>
-    <bpmn:serviceTask id="Task_CheckModuli" name="Validazione Moduli CCE (Bloccante)"/>
-    
-    <!-- Ramo Ordinario -->
-    <bpmn:userTask id="Task_LetteraOrd" name="Redazione Lettera Dimissione Ospedaliera"/>
-    <bpmn:userTask id="Task_Firma1Ord" name="1a Firma Digitale (Medico)"/>
-    <bpmn:userTask id="Task_PCT_Ord" name="Compilazione Primo Ciclo Terapeutico (PCT)"/>
-    <bpmn:intermediateThrowEvent id="Event_DimissioneParziale" name="Fine Dimissione Parziale"/>
-    <bpmn:userTask id="Task_ClickArchivia" name="Click Pulsante Archivia"/>
-    <bpmn:exclusiveGateway id="Gateway_CheckVerbale" name="Check Verbale Operatorio"/>
-    <bpmn:userTask id="Task_ArchiviaOrd" name="Archiviazione Cartella Clinica"/>
-    <bpmn:userTask id="Task_Firma2Ord" name="2a Firma Digitale (Primario)"/>
-    <bpmn:serviceTask id="Task_SyncCDR" name="Sync Automatico CDR Repository Aziendale"/>
-    <bpmn:endEvent id="End_Ordinaria" name="Cartella Archiviata nel CDR"/>
-    
-    <!-- Ramo Protetto (OdC) -->
-    <bpmn:userTask id="Task_SchedaUVM" name="Compilazione Scheda UVM / PAI"/>
-    <bpmn:serviceTask id="Task_APICOT" name="Inoltro API a COT Territoriale"/>
-    <bpmn:serviceTask id="Task_CreazioneOdC" name="Creazione Ricovero in Ospedale di Comunità"/>
-    <bpmn:endEvent id="End_Protetta" name="Paziente Trasferito e Ricovero OdC Creato"/>
-  </bpmn:process>
-</bpmn:definitions>
-                </textarea>
-            </div>
-            <div class="p-4 border-t border-slate-800 flex justify-end gap-3">
-                <button onclick="copyXml()" class="bg-slate-800 hover:bg-slate-700 text-xs text-white px-4 py-2 rounded-lg transition">
-                    Copia Codice
-                </button>
-                <button onclick="closeXmlModal()" class="bg-sky-600 hover:bg-sky-500 text-xs font-semibold text-white px-4 py-2 rounded-lg transition">
-                    Chiudi
-                </button>
-            </div>
-        </div>
+      </div>
     </div>
 
-    <!-- SCRIPT -->
-    <script>
-        function switchView(viewName) {
-            const flowchartBtn = document.getElementById('tab-flowchart-btn');
-            const swimlaneBtn = document.getElementById('tab-swimlane-btn');
-            const matrixBtn = document.getElementById('tab-matrix-btn');
-            
-            const flowchartSec = document.getElementById('view-flowchart');
-            const swimlaneSec = document.getElementById('view-swimlane');
-            const matrixSec = document.getElementById('view-matrix');
+    <!-- Azioni Header -->
+    <div class="flex items-center gap-2">
+      <!-- Test Audio Button -->
+      <button id="btn-test-voice" class="bg-slate-800 border border-slate-700 hover:bg-slate-700 text-amber-400 font-bold px-2.5 py-1.5 rounded-xl text-xs flex items-center gap-1.5 active:scale-95 transition-transform" title="Testa Avviso Vocale">
+        <i class="fa-solid fa-bullhorn text-xs"></i>
+        <span class="hidden md:inline font-mono">TEST AUDIO</span>
+      </button>
 
-            [flowchartSec, swimlaneSec, matrixSec].forEach(s => s.classList.add('hidden'));
-            [flowchartBtn, swimlaneBtn, matrixBtn].forEach(b => b.className = "flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2 text-xs font-bold rounded-md transition text-slate-400 hover:text-white");
+      <!-- Toggle Simulazione -->
+      <label class="flex items-center gap-1.5 bg-slate-800/90 border border-slate-700 px-2.5 py-1.5 rounded-xl cursor-pointer active:scale-95 transition-transform">
+        <i class="fa-solid fa-flask text-amber-400 text-xs"></i>
+        <span class="text-[11px] font-bold font-mono text-slate-300 hidden xs:inline">SIM</span>
+        <input type="checkbox" id="sim-toggle" class="sr-only peer">
+        <div class="w-7 h-4 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-amber-500 relative"></div>
+      </label>
 
-            if (viewName === 'flowchart') {
-                flowchartSec.classList.remove('hidden');
-                flowchartBtn.className = "flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2 text-xs font-bold rounded-md transition bg-sky-600 text-white shadow";
-            } else if (viewName === 'swimlane') {
-                swimlaneSec.classList.remove('hidden');
-                swimlaneBtn.className = "flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2 text-xs font-bold rounded-md transition bg-purple-600 text-white shadow";
-            } else {
-                matrixSec.classList.remove('hidden');
-                matrixBtn.className = "flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2 text-xs font-bold rounded-md transition bg-emerald-600 text-white shadow";
-            }
+      <!-- Pulsante Connessione Bluetooth -->
+      <button id="btn-connect" class="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-black px-3 py-1.5 rounded-xl font-orbitron text-xs shadow-lg shadow-cyan-500/20 flex items-center gap-1.5 active:scale-95 transition-all">
+        <i class="fa-brands fa-bluetooth-b text-sm"></i>
+        <span class="hidden sm:inline">CONNETTI BLE</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Container Telemetria -->
+  <main class="flex-1 p-3 max-w-5xl mx-auto w-full space-y-3">
+    <!-- BANNER ALLARME RIGENERAZIONE DPF -->
+    <div id="regen-alert-banner" class="hidden bg-gradient-to-r from-orange-600 via-amber-500 to-orange-600 border-2 border-amber-300 rounded-2xl p-3 glow-orange animate-regen flex items-center justify-between text-slate-950 shadow-2xl z-40">
+      <div class="flex items-center gap-3">
+        <div class="h-11 w-11 rounded-xl bg-slate-950 text-orange-400 flex items-center justify-center text-2xl font-black shrink-0 border border-orange-500">
+          <i class="fa-solid fa-fire-burner animate-bounce"></i>
+        </div>
+        <div>
+          <div class="text-[11px] font-black font-orbitron tracking-widest text-slate-950 uppercase">ATTENZIONE RIGENERAZIONE</div>
+          <div class="text-base sm:text-lg font-black font-orbitron text-slate-950 leading-tight">RIGENERAZIONE DPF IN CORSO</div>
+          <p class="text-[11px] font-bold text-slate-900 leading-tight">NON spegnere il motore! Mantieni RPM > 2000.</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-1.5">
+        <button id="btn-toggle-speech" class="bg-slate-950 text-amber-400 p-2 rounded-xl border border-orange-500/50 shrink-0 text-xs font-mono font-bold flex items-center gap-1">
+          <i class="fa-solid fa-volume-high" id="speech-icon"></i>
+          <span id="speech-toggle-text">VOCE ON</span>
+        </button>
+        <button id="btn-mute-alarm" class="bg-slate-950 text-orange-400 p-2 rounded-xl border border-orange-500/50 shrink-0">
+          <i class="fa-solid fa-bell text-base" id="audio-icon"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Header Profilo Veicolo -->
+    <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-3 flex flex-wrap items-center justify-between gap-2">
+      <div class="flex items-center gap-2">
+        <i class="fa-solid fa-car text-cyan-400"></i>
+        <span id="vehicle-name" class="font-bold text-xs sm:text-sm text-slate-200">Seleziona Veicolo o Connetti OBD</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <select id="vehicle-profile-select" class="bg-slate-950 border border-slate-700 text-xs text-slate-300 rounded-xl px-2.5 py-1 font-mono focus:outline-none focus:border-cyan-500">
+          <option value="AUTO">Auto-Rilevamento VIN</option>
+          <option value="VW_TROC_20">VW T-Roc 2.0 TDI (UDS Bosch)</option>
+          <option value="GENERIC_OBD">OBD2 Generico Standard</option>
+        </select>
+        <button id="btn-toggle-log" class="bg-slate-800 hover:bg-slate-700 text-slate-400 px-2 py-1 rounded-xl text-xs font-mono">
+          LOG
+        </button>
+      </div>
+    </div>
+
+    <!-- Griglia dei 6 Indicatori Grafici -->
+    <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
+      <!-- 1. Liquido Refrigerante -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 flex flex-col items-center justify-between text-center relative overflow-hidden">
+        <div class="text-[11px] font-bold text-slate-400 font-orbitron uppercase tracking-wider">LIQUIDO REFRIGERANTE</div>
+        <div class="relative my-2 w-28 h-28 flex items-center justify-center">
+          <svg class="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+            <path class="text-slate-800" stroke-width="3.5" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+            <path id="gauge-coolant" class="gauge-circle text-cyan-500" stroke-dasharray="100, 100" stroke-dashoffset="100" stroke-width="3.5" stroke-linecap="round" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+          </svg>
+          <div class="absolute flex flex-col items-center">
+            <span id="val-coolant" class="text-2xl font-black font-orbitron text-slate-100">--</span>
+            <span class="text-[10px] font-bold text-slate-400">°C</span>
+          </div>
+        </div>
+        <div id="sub-coolant-status" class="text-xs font-bold text-cyan-400 font-mono">In Attesa</div>
+      </div>
+
+      <!-- 2. Olio Motore -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 flex flex-col items-center justify-between text-center relative overflow-hidden">
+        <div class="text-[11px] font-bold text-slate-400 font-orbitron uppercase tracking-wider">OLIO MOTORE</div>
+        <div class="relative my-2 w-28 h-28 flex items-center justify-center">
+          <svg class="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+            <path class="text-slate-800" stroke-width="3.5" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+            <path id="gauge-oil-temp" class="gauge-circle text-amber-500" stroke-dasharray="100, 100" stroke-dashoffset="100" stroke-width="3.5" stroke-linecap="round" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+          </svg>
+          <div class="absolute flex flex-col items-center">
+            <span id="val-oil-temp" class="text-2xl font-black font-orbitron text-slate-100">--</span>
+            <span class="text-[10px] font-bold text-slate-400">°C</span>
+          </div>
+        </div>
+        <div id="sub-oil-temp-status" class="text-xs font-bold text-amber-400 font-mono">In Attesa</div>
+      </div>
+
+      <!-- 3. Intasamento DPF -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 flex flex-col items-center justify-between text-center relative overflow-hidden">
+        <div class="w-full flex items-center justify-between">
+          <span class="text-[11px] font-bold text-slate-400 font-orbitron uppercase tracking-wider">INTASAMENTO DPF</span>
+          <span id="dpf-status-pill" class="text-[9px] font-black font-mono px-1.5 py-0.5 rounded-md bg-slate-800 text-slate-400 border border-slate-700">--</span>
+        </div>
+        <div class="relative my-2 w-28 h-28 flex items-center justify-center">
+          <svg class="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+            <path class="text-slate-800" stroke-width="3.5" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+            <path id="gauge-dpf" class="gauge-circle text-orange-500" stroke-dasharray="100, 100" stroke-dashoffset="100" stroke-width="3.5" stroke-linecap="round" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+          </svg>
+          <div class="absolute flex flex-col items-center">
+            <span id="val-dpf-grams" class="text-2xl font-black font-orbitron text-slate-100">--</span>
+            <span class="text-[10px] font-bold text-slate-400">GRAMMI</span>
+          </div>
+        </div>
+        <div class="text-xs font-bold text-slate-400 font-mono">Ultima rig.: <span id="sub-dpf-km" class="text-slate-200">-- km</span></div>
+      </div>
+
+      <!-- 4. Stato Rigenerazione -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 flex flex-col items-center justify-between text-center relative overflow-hidden">
+        <div class="text-[11px] font-bold text-slate-400 font-orbitron uppercase tracking-wider">STATO RIGENERAZIONE</div>
+        <div class="flex flex-col items-center justify-center my-2">
+          <div id="regen-indicator-icon" class="w-14 h-14 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center text-2xl text-slate-500 mb-1.5">
+            <i class="fa-solid fa-fire-burner"></i>
+          </div>
+          <div id="val-regen-text" class="text-sm font-black font-orbitron text-slate-400 tracking-wider">INATTIVA</div>
+          <div id="val-regen-sub" class="text-[10px] font-semibold text-slate-400 font-mono">Filtro a riposo</div>
+        </div>
+        <div class="text-xs font-bold text-slate-400 font-mono">Gas Scarico: <span id="val-exhaust-temp" class="text-slate-200">-- °C</span></div>
+      </div>
+
+      <!-- 5. Livello Olio Motore -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 flex flex-col items-center justify-between text-center relative overflow-hidden">
+        <div class="text-[11px] font-bold text-slate-400 font-orbitron uppercase tracking-wider">LIVELLO OLIO</div>
+        <div class="w-full my-3 flex flex-col items-center">
+          <div id="val-oil-mm" class="text-2xl font-black font-orbitron text-slate-100 mb-1">-- mm</div>
+          <div id="val-oil-liters" class="text-xs font-bold font-mono text-emerald-400 mb-2">-- LITRI</div>
+          <div class="w-full bg-slate-800 h-3 rounded-full overflow-hidden p-0.5 border border-slate-700">
+            <div id="bar-oil-level" class="bg-gradient-to-r from-cyan-500 to-emerald-400 h-full rounded-full transition-all duration-500" style="width: 0%"></div>
+          </div>
+        </div>
+        <div class="text-[10px] font-bold text-slate-400 font-mono flex justify-between w-full px-1">
+          <span>MIN</span>
+          <span>OTTIMALE</span>
+          <span>MAX</span>
+        </div>
+      </div>
+
+      <!-- 6. Vita Residua Olio -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 flex flex-col items-center justify-between text-center relative overflow-hidden">
+        <div class="text-[11px] font-bold text-slate-400 font-orbitron uppercase tracking-wider">VITA RESIDUA OLIO</div>
+        <div class="relative my-2 w-28 h-28 flex items-center justify-center">
+          <svg class="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+            <path class="text-slate-800" stroke-width="3.5" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+            <path id="gauge-oil-degrade" class="gauge-circle text-emerald-500" stroke-dasharray="100, 100" stroke-dashoffset="100" stroke-width="3.5" stroke-linecap="round" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+          </svg>
+          <div class="absolute flex flex-col items-center">
+            <span id="val-oil-degrade" class="text-2xl font-black font-orbitron text-slate-100">--</span>
+          </div>
+        </div>
+        <div class="text-xs font-bold text-slate-400 font-mono">Tagliando tra: <span id="sub-service-km" class="text-slate-200">-- km</span></div>
+      </div>
+    </div>
+
+    <!-- Terminal Log Console Box -->
+    <div id="console-log-box" class="hidden bg-slate-950 border border-slate-800 rounded-2xl p-3 h-36 overflow-y-auto font-mono text-[11px] space-y-1">
+      <div class="text-slate-500">// Console di diagnostica OBD2/BLE</div>
+    </div>
+  </main>
+
+  <!-- Toast Notification Popup -->
+  <div id="toast" class="fixed bottom-4 left-1/2 -translate-x-1/2 bg-slate-900 border border-cyan-500/50 text-slate-100 px-4 py-2.5 rounded-2xl shadow-2xl flex items-center gap-3 transition-all duration-300 translate-y-20 opacity-0 z-50">
+    <i class="fa-solid fa-circle-info text-cyan-400 text-lg"></i>
+    <div>
+      <div id="toast-title" class="font-bold text-xs font-orbitron text-cyan-400">Notifica</div>
+      <div id="toast-msg" class="text-xs text-slate-300">Messaggio di sistema</div>
+    </div>
+  </div>
+
+  <script>
+    /**
+     * VAG Telemetry PRO - GitHub Pages Ready Single-File Application
+     * Standard Web Bluetooth & UDS Routine Parser for Vgate iCar Pro BLE
+     */
+
+    let bleDevice = null;
+    let gattServer = null;
+    let txCharacteristic = null;
+    let rxCharacteristic = null;
+    let isConnected = false;
+    let isSimulationMode = false;
+    let simInterval = null;
+    let pollInterval = null;
+    let audioMuted = false;
+    let speechEnabled = true;
+    let audioCtx = null;
+    let lastSpeechTime = 0;
+
+    // Helper per l'aggiornamento grafico dei radial gauges SVG
+    function updateGauge(gaugeId, val, min, max, color) {
+      const el = document.getElementById(gaugeId);
+      if (!el) return;
+      const clamped = Math.min(max, Math.max(min, val));
+      const pct = ((clamped - min) / (max - min)) * 100;
+      const offset = 100 - pct;
+      el.style.strokeDashoffset = offset;
+      if (color) el.style.stroke = color;
+    }
+
+    // Sintesi Vocale in Italiano (SpeechSynthesis API)
+    function speakText(text) {
+      if (!speechEnabled || audioMuted) return;
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+        
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'it-IT';
+        utterance.rate = 0.95;
+        utterance.pitch = 1.05;
+
+        const voices = window.speechSynthesis.getVoices();
+        const italianVoice = voices.find(v => v.lang.startsWith('it'));
+        if (italianVoice) utterance.voice = italianVoice;
+
+        window.speechSynthesis.speak(utterance);
+      }
+    }
+
+    // Cicalino Bitonale per Avviso Acustico (Web Audio API)
+    function playAlarm() {
+      if (audioMuted) return;
+      try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        
+        const now = audioCtx.currentTime;
+        const osc1 = audioCtx.createOscillator();
+        const osc2 = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+
+        osc1.type = 'sawtooth';
+        osc2.type = 'sine';
+        osc1.frequency.setValueAtTime(880, now);
+        osc1.frequency.setValueAtTime(1174.66, now + 0.15);
+        osc2.frequency.setValueAtTime(440, now);
+
+        gain.gain.setValueAtTime(0.25, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
+
+        osc1.connect(gain);
+        osc2.connect(gain);
+        gain.connect(audioCtx.destination);
+
+        osc1.start(now);
+        osc2.start(now);
+        osc1.stop(now + 0.35);
+        osc2.stop(now + 0.35);
+      } catch (e) {}
+    }
+
+    // Oggetto Telemetria Principale
+    const telemetry = {
+      coolantTemp: 0,
+      oilTemp: 0,
+      dpfSootGrams: 0,
+      dpfRegenActive: false,
+      dpfKmSinceRegen: 0,
+      exhaustTemp: 0,
+      oilLevelMm: 0,
+      oilLevelLiters: 0,
+      oilLifePercent: 0,
+      vin: ''
+    };
+
+    // Riferimenti DOM
+    const btnConnect = document.getElementById('btn-connect');
+    const simToggle = document.getElementById('sim-toggle');
+    const bleStatusDot = document.getElementById('ble-status-dot');
+    const bleStatusText = document.getElementById('ble-status-text');
+    const vehicleName = document.getElementById('vehicle-name');
+    const vehicleProfileSelect = document.getElementById('vehicle-profile-select');
+    const regenAlertBanner = document.getElementById('regen-alert-banner');
+    const btnMuteAlarm = document.getElementById('btn-mute-alarm');
+    const btnToggleSpeech = document.getElementById('btn-toggle-speech');
+    const btnTestVoice = document.getElementById('btn-test-voice');
+    const consoleLogBox = document.getElementById('console-log-box');
+
+    function log(msg, type = 'info') {
+      const time = new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const el = document.createElement('div');
+      el.className = type === 'tx' ? 'text-cyan-400' : type === 'rx' ? 'text-emerald-400' : type === 'warn' ? 'text-amber-400' : type === 'error' ? 'text-red-400' : 'text-slate-400';
+      el.innerHTML = `<span class="text-slate-600">[${time}]</span> ${msg}`;
+      consoleLogBox.appendChild(el);
+      consoleLogBox.scrollTop = consoleLogBox.scrollHeight;
+    }
+
+    // Renderizza tutti i 6 indicatori nell'interfaccia
+    function render() {
+      // 1. Liquido Refrigerante
+      document.getElementById('val-coolant').innerText = telemetry.coolantTemp || '--';
+      let cColor = '#06b6d4';
+      let cStatus = 'Ottimale';
+      if (telemetry.coolantTemp < 75) { cColor = '#3b82f6'; cStatus = 'Freddo'; }
+      else if (telemetry.coolantTemp > 100) { cColor = '#ef4444'; cStatus = 'PERICOLO!'; }
+      updateGauge('gauge-coolant', telemetry.coolantTemp, 0, 120, cColor);
+      document.getElementById('sub-coolant-status').innerText = cStatus;
+
+      // 2. Olio Motore
+      document.getElementById('val-oil-temp').innerText = telemetry.oilTemp || '--';
+      let oColor = '#f59e0b';
+      let oStatus = 'Scaldamento';
+      if (telemetry.oilTemp >= 85 && telemetry.oilTemp <= 110) { oColor = '#10b981'; oStatus = 'Esercizio'; }
+      else if (telemetry.oilTemp > 120) { oColor = '#ef4444'; oStatus = 'ALTA TEMP!'; }
+      updateGauge('gauge-oil-temp', telemetry.oilTemp, 0, 150, oColor);
+      document.getElementById('sub-oil-temp-status').innerText = oStatus;
+
+      // 3. Intasamento DPF
+      document.getElementById('val-dpf-grams').innerText = telemetry.dpfSootGrams ? telemetry.dpfSootGrams.toFixed(1) : '--';
+      const dpfColor = telemetry.dpfSootGrams > 20 ? '#f97316' : '#06b6d4';
+      updateGauge('gauge-dpf', telemetry.dpfSootGrams, 0, 30, dpfColor);
+      document.getElementById('sub-dpf-km').innerText = telemetry.dpfKmSinceRegen ? `${telemetry.dpfKmSinceRegen} km` : '-- km';
+      const pill = document.getElementById('dpf-status-pill');
+      pill.innerText = telemetry.dpfSootGrams > 20 ? 'ELEVATO' : 'OK';
+      pill.className = telemetry.dpfSootGrams > 20 ? 'text-[9px] font-black font-mono px-1.5 py-0.5 rounded-md bg-amber-950 text-amber-400 border border-amber-500/40' : 'text-[9px] font-black font-mono px-1.5 py-0.5 rounded-md bg-emerald-950 text-emerald-400 border border-emerald-500/40';
+
+      // 4. Stato Rigenerazione DPF
+      const regText = document.getElementById('val-regen-text');
+      const regSub = document.getElementById('val-regen-sub');
+      const regIcon = document.getElementById('regen-indicator-icon');
+      if (telemetry.dpfRegenActive) {
+        regText.innerText = 'IN CORSO!';
+        regText.className = 'text-sm font-black font-orbitron text-orange-400 tracking-wider animate-pulse';
+        regSub.innerText = 'Pulizia DPF Attiva';
+        regIcon.className = 'w-14 h-14 rounded-2xl bg-orange-950/90 border-2 border-orange-500 flex items-center justify-center text-2xl text-orange-400 mb-1.5 animate-bounce glow-orange';
+        regenAlertBanner.classList.remove('hidden');
+
+        playAlarm();
+        
+        // Avviso vocale cadenzato ogni 12 secondi
+        const nowMs = Date.now();
+        if (nowMs - lastSpeechTime > 12000) {
+          speakText("Attenzione, rigenerazione D P F in corso. Non spegnere il motore.");
+          lastSpeechTime = nowMs;
+        }
+      } else {
+        regText.innerText = 'INATTIVA';
+        regText.className = 'text-sm font-black font-orbitron text-slate-400 tracking-wider';
+        regSub.innerText = 'Filtro a riposo';
+        regIcon.className = 'w-14 h-14 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center text-2xl text-slate-500 mb-1.5';
+        regenAlertBanner.classList.add('hidden');
+        lastSpeechTime = 0;
+      }
+      document.getElementById('val-exhaust-temp').innerText = telemetry.exhaustTemp ? `${telemetry.exhaustTemp} °C` : '-- °C';
+
+      // 5. Livello Olio Motore
+      document.getElementById('val-oil-mm').innerText = telemetry.oilLevelMm ? `${telemetry.oilLevelMm} mm` : '-- mm';
+      document.getElementById('val-oil-liters').innerText = telemetry.oilLevelLiters ? `${telemetry.oilLevelLiters.toFixed(1)} LITRI (OK)` : '-- LITRI';
+      const pct = Math.min(100, Math.max(0, ((telemetry.oilLevelMm - 30) / 40) * 100));
+      document.getElementById('bar-oil-level').style.width = `${pct}%`;
+
+      // 6. Vita Residua Olio
+      document.getElementById('val-oil-degrade').innerText = telemetry.oilLifePercent ? `${telemetry.oilLifePercent}%` : '--%';
+      updateGauge('gauge-oil-degrade', telemetry.oilLifePercent, 0, 100, telemetry.oilLifePercent > 30 ? '#10b981' : '#ef4444');
+      document.getElementById('sub-service-km').innerText = telemetry.oilLifePercent ? `${Math.round((telemetry.oilLifePercent / 100) * 15000).toLocaleString()} km` : '-- km';
+    }
+
+    // Motore di Simulazione
+    function startSimulation() {
+      isSimulationMode = true;
+      bleStatusDot.className = 'w-2 h-2 rounded-full bg-amber-400 animate-ping';
+      bleStatusText.innerText = 'SIMULATORE ATTIVO';
+      vehicleName.innerText = 'VW T-Roc 2.0 TDI 4Motion (2019)';
+      vehicleProfileSelect.value = 'VW_TROC_20';
+      log('Simulazione avviata (Profilo VW T-Roc 2.0 TDI)', 'warn');
+
+      telemetry.coolantTemp = 88;
+      telemetry.oilTemp = 96;
+      telemetry.dpfSootGrams = 22.4;
+      telemetry.dpfRegenActive = false;
+      telemetry.dpfKmSinceRegen = 310;
+      telemetry.exhaustTemp = 240;
+      telemetry.oilLevelMm = 54;
+      telemetry.oilLevelLiters = 4.7;
+      telemetry.oilLifePercent = 80;
+
+      let tick = 0;
+      simInterval = setInterval(() => {
+        tick++;
+        telemetry.coolantTemp = Math.min(96, Math.max(82, telemetry.coolantTemp + (Math.random() > 0.5 ? 1 : -1)));
+        telemetry.oilTemp = Math.min(104, Math.max(90, telemetry.oilTemp + (Math.random() > 0.4 ? 1 : -1)));
+        telemetry.dpfSootGrams += 0.05;
+
+        if (tick >= 6 && tick <= 16) {
+          telemetry.dpfRegenActive = true;
+          telemetry.exhaustTemp = 635;
+          telemetry.dpfSootGrams = Math.max(2.1, telemetry.dpfSootGrams - 1.5);
+        } else if (tick > 16) {
+          telemetry.dpfRegenActive = false;
+          telemetry.exhaustTemp = 230;
+          telemetry.dpfKmSinceRegen = 0;
+          if (tick > 26) tick = 0;
         }
 
-        function simulaAzione(tipo) {
-            const box = document.getElementById('sim-response-box');
-            if (tipo === 'dimetti') {
-                box.innerHTML = `
-                    <div class="text-left w-full space-y-1">
-                        <span class="font-bold text-sky-400 block"><i class="fa-solid fa-play mr-1"></i> Avvio Dimissione Ordinaria</span>
-                        <p class="text-slate-300">1. Verificato stato moduli CCE (OK).</p>
-                        <p class="text-slate-300">2. Richiesta redazione Lettera + 1ª Firma Digitale Medico + PCT (Dimissione Parziale).</p>
-                    </div>
-                `;
-            } else if (tipo === 'protetta') {
-                box.innerHTML = `
-                    <div class="text-left w-full space-y-1">
-                        <span class="font-bold text-purple-400 block"><i class="fa-solid fa-play mr-1"></i> Avvio Dimissione Protetta</span>
-                        <p class="text-slate-300">1. Apertura Scheda UVM / PAI ed invio richiesta telematica a COT.</p>
-                        <p class="text-slate-300">2. Alla conferma del posto, generazione automatica e <strong>Creazione Ricovero presso l'OdC</strong> (No Firma, No PCT, No CDR).</p>
-                    </div>
-                `;
-            } else if (tipo === 'archivia') {
-                box.innerHTML = `
-                    <div class="text-left w-full space-y-2 bg-amber-950/40 p-3 rounded-lg border border-amber-800/60">
-                        <span class="font-bold text-amber-300 block flex items-center gap-1.5"><i class="fa-solid fa-triangle-exclamation"></i> Controllo Verbale Operatorio al click su Archivia</span>
-                        <p class="text-slate-200">"Attenzione: il Verbale Operatorio risulta in bozza o non validato. Vuoi proseguire comunque con l'archiviazione?"</p>
-                        <div class="flex gap-2 pt-1">
-                            <span class="bg-amber-600 text-slate-950 font-bold px-2 py-0.5 rounded text-[10px]">SÌ: Procedi alla 2ª Firma Primario & Sync CDR</span>
-                            <span class="bg-slate-800 text-slate-300 px-2 py-0.5 rounded text-[10px]">NO: Annulla</span>
-                        </div>
-                    </div>
-                `;
-            }
-        }
+        render();
+      }, 1500);
+    }
 
-        function openXmlModal() {
-            document.getElementById('xml-modal').classList.remove('hidden');
-        }
+    function stopSimulation() {
+      if (simInterval) clearInterval(simInterval);
+      isSimulationMode = false;
+      bleStatusDot.className = 'w-2 h-2 rounded-full bg-slate-600';
+      bleStatusText.innerText = 'DISCONNESSO';
+      log('Simulazione arrestata.', 'info');
+    }
 
-        function closeXmlModal() {
-            document.getElementById('xml-modal').classList.add('hidden');
-        }
+    // Gestione Connessione Web Bluetooth per Vgate iCar Pro BLE
+    async function connectBluetooth() {
+      if (!navigator.bluetooth) {
+        showToast('Web Bluetooth non supportato', 'Usa Chrome o Edge su Android/PC.', 'error');
+        return;
+      }
+      try {
+        log('Ricerca adattatore Vgate iCar BLE...', 'info');
+        bleDevice = await navigator.bluetooth.requestDevice({
+          acceptAllDevices: true,
+          optionalServices: [
+            '000018f0-0000-1000-8000-00805f9b34fb', 
+            '0000fff0-0000-1000-8000-00805f9b34fb',
+            'e7810a71-73ae-499d-8c15-faa9aef0c3f2' // UUID Trasparente Vgate BLE
+          ]
+        });
 
-        function copyXml() {
-            const textarea = document.getElementById('bpmn-xml-code');
-            textarea.select();
-            document.execCommand('copy');
-            alert('Codice XML BPMN 2.0 copiato negli appunti!');
-        }
-    </script>
+        bleDevice.addEventListener('gattserverdisconnected', () => {
+          isConnected = false;
+          if (pollInterval) clearInterval(pollInterval);
+          bleStatusDot.className = 'w-2 h-2 rounded-full bg-slate-600';
+          bleStatusText.innerText = 'DISCONNESSO';
+          showToast('Disconnesso', 'Connessione OBD persa', 'warn');
+        });
+
+        gattServer = await bleDevice.gatt.connect();
+        isConnected = true;
+        bleStatusDot.className = 'w-2 h-2 rounded-full bg-emerald-400 animate-pulse';
+        bleStatusText.innerText = 'CONNESSO (BLE)';
+        showToast('OBD Connesso!', 'Adattatore pronto alla lettura', 'success');
+
+        log(`Dispositivo GATT connesso: ${bleDevice.name}`, 'info');
+        vehicleName.innerText = 'VW T-Roc 2.0 TDI (Connessione OBD Attiva)';
+        vehicleProfileSelect.value = 'VW_TROC_20';
+        
+      } catch (e) {
+        log(`Errore Connessione: ${e.message}`, 'error');
+      }
+    }
+
+    function showToast(title, msg, type = 'info') {
+      const toast = document.getElementById('toast');
+      document.getElementById('toast-title').innerText = title;
+      document.getElementById('toast-msg').innerText = msg;
+      toast.classList.remove('translate-y-20', 'opacity-0');
+      setTimeout(() => toast.classList.add('translate-y-20', 'opacity-0'), 3500);
+    }
+
+    // Inizializzazione Eventi al Caricamento
+    window.addEventListener('DOMContentLoaded', () => {
+      // Inizializzazione immediata della voce del browser
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.onvoiceschanged = () => {
+          window.speechSynthesis.getVoices();
+        };
+      }
+
+      btnConnect.addEventListener('click', connectBluetooth);
+
+      simToggle.addEventListener('change', (e) => {
+        if (e.target.checked) startSimulation();
+        else stopSimulation();
+      });
+
+      // Il pulsante di TEST serve anche a sbloccare l'AudioContext su iOS e Android
+      btnTestVoice.addEventListener('click', () => {
+        playAlarm();
+        speakText("Test del sistema audio completato. Attenzione, rigenerazione D P F in corso. Non spegnere il motore.");
+        showToast("Test Audio Vocale", "Sintesi vocale e cicalino attivati", "info");
+      });
+
+      btnToggleSpeech.addEventListener('click', () => {
+        speechEnabled = !speechEnabled;
+        document.getElementById('speech-icon').className = speechEnabled ? 'fa-solid fa-volume-high text-amber-400' : 'fa-solid fa-volume-xmark text-slate-500';
+        document.getElementById('speech-toggle-text').innerText = speechEnabled ? 'VOCE ON' : 'VOCE OFF';
+        showToast("Sintesi Vocale", speechEnabled ? "Avvisi vocali attivati" : "Avvisi vocali disattivati", "info");
+      });
+
+      btnMuteAlarm.addEventListener('click', () => {
+        audioMuted = !audioMuted;
+        document.getElementById('audio-icon').className = audioMuted ? 'fa-solid fa-bell-slash text-slate-500' : 'fa-solid fa-bell text-orange-400';
+      });
+
+      document.getElementById('btn-toggle-log').addEventListener('click', () => {
+        consoleLogBox.classList.toggle('hidden');
+      });
+
+      render();
+    });
+  </script>
 </body>
 </html>
