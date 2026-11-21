@@ -179,8 +179,8 @@
             <path id="gauge-dpf" class="gauge-circle text-orange-500" stroke-dasharray="100, 100" stroke-dashoffset="100" stroke-width="3.5" stroke-linecap="round" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
           </svg>
           <div class="absolute flex flex-col items-center">
-            <span id="val-dpf-grams" class="text-2xl font-black font-orbitron text-slate-100">--</span>
-            <span class="text-[10px] font-bold text-slate-400">GRAMMI</span>
+            <span id="val-dpf-pct" class="text-2xl font-black font-orbitron text-slate-100">--%</span>
+            <span id="val-dpf-grams" class="text-[10px] font-bold text-slate-400">-- g</span>
           </div>
         </div>
         <div class="text-xs font-bold text-slate-400 font-mono">Ultima rig.: <span id="sub-dpf-km" class="text-slate-200">-- km</span></div>
@@ -272,6 +272,15 @@
     let isProcessingCommand = false;
     let currentResolver = null;
     let responseTimeout = null;
+
+    // Capacità di riferimento del filtro DPF per calcolare la percentuale di intasamento.
+    // È una STIMA: regola questo valore in base al tuo filtro/centralina.
+    const DPF_LIMIT_GRAMS = 30;
+
+    // Testo mostrato quando un valore non arriva: distingue "non collegato" da "collegato ma nessun dato"
+    function noDataText() {
+      return isConnected ? 'NESSUN DATO' : 'IN ATTESA';
+    }
 
     // Helper per l'aggiornamento grafico dei radial gauges SVG
     function updateGauge(gaugeId, val, min, max, color) {
@@ -411,14 +420,17 @@
       // 3. Intasamento DPF
       const pill = document.getElementById('dpf-status-pill');
       if (telemetry.dpfSootGrams !== null && !Number.isNaN(telemetry.dpfSootGrams)) {
-        document.getElementById('val-dpf-grams').innerText = telemetry.dpfSootGrams.toFixed(1);
+        const dpfPct = Math.min(100, Math.max(0, (telemetry.dpfSootGrams / DPF_LIMIT_GRAMS) * 100));
+        document.getElementById('val-dpf-pct').innerText = `${Math.round(dpfPct)}%`;
+        document.getElementById('val-dpf-grams').innerText = `${telemetry.dpfSootGrams.toFixed(1)} g`;
         const dpfColor = telemetry.dpfSootGrams > 20 ? '#f97316' : '#06b6d4';
-        updateGauge('gauge-dpf', telemetry.dpfSootGrams, 0, 30, dpfColor);
+        updateGauge('gauge-dpf', dpfPct, 0, 100, dpfColor);
         pill.innerText = telemetry.dpfSootGrams > 20 ? 'ELEVATO' : 'OK';
         pill.className = telemetry.dpfSootGrams > 20 ? 'text-[9px] font-black font-mono px-1.5 py-0.5 rounded-md bg-amber-950 text-amber-400 border border-amber-500/40' : 'text-[9px] font-black font-mono px-1.5 py-0.5 rounded-md bg-emerald-950 text-emerald-400 border border-emerald-500/40';
       } else {
-        document.getElementById('val-dpf-grams').innerText = '--';
-        updateGauge('gauge-dpf', 0, 0, 30, '#f97316');
+        document.getElementById('val-dpf-pct').innerText = '--%';
+        document.getElementById('val-dpf-grams').innerText = noDataText();
+        updateGauge('gauge-dpf', 0, 0, 100, '#f97316');
         pill.innerText = '--';
         pill.className = 'text-[9px] font-black font-mono px-1.5 py-0.5 rounded-md bg-slate-800 text-slate-400 border border-slate-700';
       }
@@ -460,7 +472,7 @@
         document.getElementById('bar-oil-level').style.width = `${pct}%`;
       } else {
         document.getElementById('val-oil-mm').innerText = '-- mm';
-        document.getElementById('val-oil-liters').innerText = '-- LITRI';
+        document.getElementById('val-oil-liters').innerText = noDataText();
         document.getElementById('bar-oil-level').style.width = '0%';
       }
 
@@ -673,6 +685,7 @@
           return bytes.slice(i + 3);
         }
       }
+      log(`DID ${cleanDid} senza risposta valida (rx: "${raw || 'vuoto'}")`, 'warn');
       return null;
     }
 
@@ -737,6 +750,7 @@
       // 3. Query UDS VAG se profilo T-Roc / VAG attivo
       if (profile === 'VW_TROC_20' || profile === 'AUTO') {
         await sendObdCommand('AT SH 7E0', 900);
+        await sendObdCommand('10 03', 1200); // sessione diagnostica estesa (solo lettura)
 
         // Temperatura olio via UDS se Mode 01 5C non ha risposto
         if (telemetry.oilTemp === null) {
