@@ -57,7 +57,7 @@
       </div>
       <div>
         <h1 class="text-sm sm:text-base font-extrabold font-orbitron tracking-wider text-cyan-400 leading-none">
-          TELEMETRY T-ROC JESSY/ANTO
+          VAG TELEMETRY
         </h1>
         <div class="text-[10px] font-mono text-slate-400 flex items-center gap-1.5 mt-0.5">
           <span id="ble-status-dot" class="w-2 h-2 rounded-full bg-slate-600"></span>
@@ -85,7 +85,7 @@
       <!-- Pulsante Connessione Bluetooth -->
       <button id="btn-connect" class="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-black px-3 py-1.5 rounded-xl font-orbitron text-xs shadow-lg shadow-cyan-500/20 flex items-center gap-1.5 active:scale-95 transition-all">
         <i class="fa-brands fa-bluetooth-b text-sm"></i>
-        <span class="hidden sm:inline">CONNETTI BLE</span>
+        <span id="btn-connect-label" class="hidden sm:inline">CONNETTI BLE</span>
       </button>
     </div>
   </header>
@@ -101,7 +101,7 @@
         <div>
           <div class="text-[11px] font-black font-orbitron tracking-widest text-slate-950 uppercase">ATTENZIONE RIGENERAZIONE</div>
           <div class="text-base sm:text-lg font-black font-orbitron text-slate-950 leading-tight">RIGENERAZIONE DPF IN CORSO</div>
-          <p class="text-[11px] font-bold text-slate-900 leading-tight">NON spegnere il motore! Mantieni RPM > 2000.</p>
+          <p class="text-[11px] font-bold text-slate-900 leading-tight">NON spegnere il motore! Mantieni RPM &gt; 2000.</p>
         </div>
       </div>
       <div class="flex items-center gap-1.5">
@@ -233,8 +233,8 @@
     </div>
 
     <!-- Terminal Log Console Box -->
-    <div id="console-log-box" class="hidden bg-slate-950 border border-slate-800 rounded-2xl p-3 h-36 overflow-y-auto font-mono text-[11px] space-y-1">
-      <div class="text-slate-500">// Console di diagnostica OBD2/BLE</div>
+    <div id="console-log-box" class="bg-slate-950 border border-slate-800 rounded-2xl p-3 h-40 overflow-y-auto font-mono text-[11px] space-y-1">
+      <div class="text-slate-500">// Console di diagnostica OBD2/BLE (apri LOG o guarda qui i comandi)</div>
     </div>
   </main>
 
@@ -250,13 +250,13 @@
   <script>
     /**
      * VAG Telemetry PRO - GitHub Pages Ready Single-File Application
-     * Standard Web Bluetooth & UDS Routine Parser for Vgate iCar Pro BLE
+     * Web Bluetooth GATT Write/Notify + ELM327 / UDS Polling for Vgate iCar Pro BLE
      */
 
     let bleDevice = null;
     let gattServer = null;
-    let txCharacteristic = null;
-    let rxCharacteristic = null;
+    let writeCharacteristic = null;
+    let notifyCharacteristic = null;
     let isConnected = false;
     let isSimulationMode = false;
     let simInterval = null;
@@ -266,11 +266,18 @@
     let audioCtx = null;
     let lastSpeechTime = 0;
 
+    // Coda comandi ELM327 / OBD2
+    let rxBuffer = '';
+    let commandQueue = [];
+    let isProcessingCommand = false;
+    let currentResolver = null;
+    let responseTimeout = null;
+
     // Helper per l'aggiornamento grafico dei radial gauges SVG
     function updateGauge(gaugeId, val, min, max, color) {
       const el = document.getElementById(gaugeId);
       if (!el) return;
-      const clamped = Math.min(max, Math.max(min, val));
+      const clamped = Math.min(max, Math.max(min, Number(val) || 0));
       const pct = ((clamped - min) / (max - min)) * 100;
       const offset = 100 - pct;
       el.style.strokeDashoffset = offset;
@@ -281,18 +288,19 @@
     function speakText(text) {
       if (!speechEnabled || audioMuted) return;
       if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-        
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = 'it-IT';
-        utterance.rate = 0.95;
-        utterance.pitch = 1.05;
+        try {
+          window.speechSynthesis.cancel();
+          const utterance = new SpeechSynthesisUtterance(text);
+          utterance.lang = 'it-IT';
+          utterance.rate = 0.95;
+          utterance.pitch = 1.05;
 
-        const voices = window.speechSynthesis.getVoices();
-        const italianVoice = voices.find(v => v.lang.startsWith('it'));
-        if (italianVoice) utterance.voice = italianVoice;
+          const voices = window.speechSynthesis.getVoices();
+          const italianVoice = voices.find(v => v.lang.startsWith('it'));
+          if (italianVoice) utterance.voice = italianVoice;
 
-        window.speechSynthesis.speak(utterance);
+          window.speechSynthesis.speak(utterance);
+        } catch (e) {}
       }
     }
 
@@ -330,20 +338,21 @@
 
     // Oggetto Telemetria Principale
     const telemetry = {
-      coolantTemp: 0,
-      oilTemp: 0,
-      dpfSootGrams: 0,
+      coolantTemp: null,
+      oilTemp: null,
+      dpfSootGrams: null,
       dpfRegenActive: false,
-      dpfKmSinceRegen: 0,
-      exhaustTemp: 0,
-      oilLevelMm: 0,
-      oilLevelLiters: 0,
-      oilLifePercent: 0,
+      dpfKmSinceRegen: null,
+      exhaustTemp: null,
+      oilLevelMm: null,
+      oilLevelLiters: null,
+      oilLifePercent: null,
       vin: ''
     };
 
     // Riferimenti DOM
     const btnConnect = document.getElementById('btn-connect');
+    const btnConnectLabel = document.getElementById('btn-connect-label');
     const simToggle = document.getElementById('sim-toggle');
     const bleStatusDot = document.getElementById('ble-status-dot');
     const bleStatusText = document.getElementById('ble-status-text');
@@ -361,37 +370,59 @@
       el.className = type === 'tx' ? 'text-cyan-400' : type === 'rx' ? 'text-emerald-400' : type === 'warn' ? 'text-amber-400' : type === 'error' ? 'text-red-400' : 'text-slate-400';
       el.innerHTML = `<span class="text-slate-600">[${time}]</span> ${msg}`;
       consoleLogBox.appendChild(el);
+      while (consoleLogBox.children.length > 120) {
+        consoleLogBox.removeChild(consoleLogBox.firstChild);
+      }
       consoleLogBox.scrollTop = consoleLogBox.scrollHeight;
     }
 
     // Renderizza tutti i 6 indicatori nell'interfaccia
     function render() {
       // 1. Liquido Refrigerante
-      document.getElementById('val-coolant').innerText = telemetry.coolantTemp || '--';
-      let cColor = '#06b6d4';
-      let cStatus = 'Ottimale';
-      if (telemetry.coolantTemp < 75) { cColor = '#3b82f6'; cStatus = 'Freddo'; }
-      else if (telemetry.coolantTemp > 100) { cColor = '#ef4444'; cStatus = 'PERICOLO!'; }
-      updateGauge('gauge-coolant', telemetry.coolantTemp, 0, 120, cColor);
-      document.getElementById('sub-coolant-status').innerText = cStatus;
+      if (telemetry.coolantTemp !== null && !Number.isNaN(telemetry.coolantTemp)) {
+        document.getElementById('val-coolant').innerText = Math.round(telemetry.coolantTemp);
+        let cColor = '#06b6d4';
+        let cStatus = 'Ottimale';
+        if (telemetry.coolantTemp < 75) { cColor = '#3b82f6'; cStatus = 'Freddo'; }
+        else if (telemetry.coolantTemp > 100) { cColor = '#ef4444'; cStatus = 'PERICOLO!'; }
+        updateGauge('gauge-coolant', telemetry.coolantTemp, 0, 120, cColor);
+        document.getElementById('sub-coolant-status').innerText = cStatus;
+      } else {
+        document.getElementById('val-coolant').innerText = '--';
+        updateGauge('gauge-coolant', 0, 0, 120, '#06b6d4');
+        document.getElementById('sub-coolant-status').innerText = 'In Attesa';
+      }
 
       // 2. Olio Motore
-      document.getElementById('val-oil-temp').innerText = telemetry.oilTemp || '--';
-      let oColor = '#f59e0b';
-      let oStatus = 'Scaldamento';
-      if (telemetry.oilTemp >= 85 && telemetry.oilTemp <= 110) { oColor = '#10b981'; oStatus = 'Esercizio'; }
-      else if (telemetry.oilTemp > 120) { oColor = '#ef4444'; oStatus = 'ALTA TEMP!'; }
-      updateGauge('gauge-oil-temp', telemetry.oilTemp, 0, 150, oColor);
-      document.getElementById('sub-oil-temp-status').innerText = oStatus;
+      if (telemetry.oilTemp !== null && !Number.isNaN(telemetry.oilTemp)) {
+        document.getElementById('val-oil-temp').innerText = Math.round(telemetry.oilTemp);
+        let oColor = '#f59e0b';
+        let oStatus = 'Scaldamento';
+        if (telemetry.oilTemp >= 85 && telemetry.oilTemp <= 110) { oColor = '#10b981'; oStatus = 'Esercizio'; }
+        else if (telemetry.oilTemp > 120) { oColor = '#ef4444'; oStatus = 'ALTA TEMP!'; }
+        updateGauge('gauge-oil-temp', telemetry.oilTemp, 0, 150, oColor);
+        document.getElementById('sub-oil-temp-status').innerText = oStatus;
+      } else {
+        document.getElementById('val-oil-temp').innerText = '--';
+        updateGauge('gauge-oil-temp', 0, 0, 150, '#f59e0b');
+        document.getElementById('sub-oil-temp-status').innerText = 'In Attesa';
+      }
 
       // 3. Intasamento DPF
-      document.getElementById('val-dpf-grams').innerText = telemetry.dpfSootGrams ? telemetry.dpfSootGrams.toFixed(1) : '--';
-      const dpfColor = telemetry.dpfSootGrams > 20 ? '#f97316' : '#06b6d4';
-      updateGauge('gauge-dpf', telemetry.dpfSootGrams, 0, 30, dpfColor);
-      document.getElementById('sub-dpf-km').innerText = telemetry.dpfKmSinceRegen ? `${telemetry.dpfKmSinceRegen} km` : '-- km';
       const pill = document.getElementById('dpf-status-pill');
-      pill.innerText = telemetry.dpfSootGrams > 20 ? 'ELEVATO' : 'OK';
-      pill.className = telemetry.dpfSootGrams > 20 ? 'text-[9px] font-black font-mono px-1.5 py-0.5 rounded-md bg-amber-950 text-amber-400 border border-amber-500/40' : 'text-[9px] font-black font-mono px-1.5 py-0.5 rounded-md bg-emerald-950 text-emerald-400 border border-emerald-500/40';
+      if (telemetry.dpfSootGrams !== null && !Number.isNaN(telemetry.dpfSootGrams)) {
+        document.getElementById('val-dpf-grams').innerText = telemetry.dpfSootGrams.toFixed(1);
+        const dpfColor = telemetry.dpfSootGrams > 20 ? '#f97316' : '#06b6d4';
+        updateGauge('gauge-dpf', telemetry.dpfSootGrams, 0, 30, dpfColor);
+        pill.innerText = telemetry.dpfSootGrams > 20 ? 'ELEVATO' : 'OK';
+        pill.className = telemetry.dpfSootGrams > 20 ? 'text-[9px] font-black font-mono px-1.5 py-0.5 rounded-md bg-amber-950 text-amber-400 border border-amber-500/40' : 'text-[9px] font-black font-mono px-1.5 py-0.5 rounded-md bg-emerald-950 text-emerald-400 border border-emerald-500/40';
+      } else {
+        document.getElementById('val-dpf-grams').innerText = '--';
+        updateGauge('gauge-dpf', 0, 0, 30, '#f97316');
+        pill.innerText = '--';
+        pill.className = 'text-[9px] font-black font-mono px-1.5 py-0.5 rounded-md bg-slate-800 text-slate-400 border border-slate-700';
+      }
+      document.getElementById('sub-dpf-km').innerText = telemetry.dpfKmSinceRegen !== null ? `${telemetry.dpfKmSinceRegen} km` : '-- km';
 
       // 4. Stato Rigenerazione DPF
       const regText = document.getElementById('val-regen-text');
@@ -406,7 +437,6 @@
 
         playAlarm();
         
-        // Avviso vocale cadenzato ogni 12 secondi
         const nowMs = Date.now();
         if (nowMs - lastSpeechTime > 12000) {
           speakText("Attenzione, rigenerazione D P F in corso. Non spegnere il motore.");
@@ -420,22 +450,35 @@
         regenAlertBanner.classList.add('hidden');
         lastSpeechTime = 0;
       }
-      document.getElementById('val-exhaust-temp').innerText = telemetry.exhaustTemp ? `${telemetry.exhaustTemp} °C` : '-- °C';
+      document.getElementById('val-exhaust-temp').innerText = telemetry.exhaustTemp !== null ? `${Math.round(telemetry.exhaustTemp)} °C` : '-- °C';
 
       // 5. Livello Olio Motore
-      document.getElementById('val-oil-mm').innerText = telemetry.oilLevelMm ? `${telemetry.oilLevelMm} mm` : '-- mm';
-      document.getElementById('val-oil-liters').innerText = telemetry.oilLevelLiters ? `${telemetry.oilLevelLiters.toFixed(1)} LITRI (OK)` : '-- LITRI';
-      const pct = Math.min(100, Math.max(0, ((telemetry.oilLevelMm - 30) / 40) * 100));
-      document.getElementById('bar-oil-level').style.width = `${pct}%`;
+      if (telemetry.oilLevelMm !== null && !Number.isNaN(telemetry.oilLevelMm)) {
+        document.getElementById('val-oil-mm').innerText = `${Math.round(telemetry.oilLevelMm)} mm`;
+        document.getElementById('val-oil-liters').innerText = telemetry.oilLevelLiters !== null ? `${telemetry.oilLevelLiters.toFixed(1)} LITRI (OK)` : 'SENSORE ATTIVO';
+        const pct = Math.min(100, Math.max(0, ((telemetry.oilLevelMm - 30) / 40) * 100));
+        document.getElementById('bar-oil-level').style.width = `${pct}%`;
+      } else {
+        document.getElementById('val-oil-mm').innerText = '-- mm';
+        document.getElementById('val-oil-liters').innerText = '-- LITRI';
+        document.getElementById('bar-oil-level').style.width = '0%';
+      }
 
       // 6. Vita Residua Olio
-      document.getElementById('val-oil-degrade').innerText = telemetry.oilLifePercent ? `${telemetry.oilLifePercent}%` : '--%';
-      updateGauge('gauge-oil-degrade', telemetry.oilLifePercent, 0, 100, telemetry.oilLifePercent > 30 ? '#10b981' : '#ef4444');
-      document.getElementById('sub-service-km').innerText = telemetry.oilLifePercent ? `${Math.round((telemetry.oilLifePercent / 100) * 15000).toLocaleString()} km` : '-- km';
+      if (telemetry.oilLifePercent !== null && !Number.isNaN(telemetry.oilLifePercent)) {
+        document.getElementById('val-oil-degrade').innerText = `${Math.round(telemetry.oilLifePercent)}%`;
+        updateGauge('gauge-oil-degrade', telemetry.oilLifePercent, 0, 100, telemetry.oilLifePercent > 30 ? '#10b981' : '#ef4444');
+        document.getElementById('sub-service-km').innerText = `${Math.round((telemetry.oilLifePercent / 100) * 15000).toLocaleString()} km`;
+      } else {
+        document.getElementById('val-oil-degrade').innerText = '--';
+        updateGauge('gauge-oil-degrade', 0, 0, 100, '#10b981');
+        document.getElementById('sub-service-km').innerText = '-- km';
+      }
     }
 
     // Motore di Simulazione
     function startSimulation() {
+      stopPolling();
       isSimulationMode = true;
       bleStatusDot.className = 'w-2 h-2 rounded-full bg-amber-400 animate-ping';
       bleStatusText.innerText = 'SIMULATORE ATTIVO';
@@ -477,49 +520,339 @@
 
     function stopSimulation() {
       if (simInterval) clearInterval(simInterval);
+      simInterval = null;
       isSimulationMode = false;
-      bleStatusDot.className = 'w-2 h-2 rounded-full bg-slate-600';
-      bleStatusText.innerText = 'DISCONNESSO';
+      if (!isConnected) {
+        bleStatusDot.className = 'w-2 h-2 rounded-full bg-slate-600';
+        bleStatusText.innerText = 'DISCONNESSO';
+      } else {
+        bleStatusDot.className = 'w-2 h-2 rounded-full bg-emerald-400 animate-pulse';
+        bleStatusText.innerText = 'CONNESSO (BLE)';
+        startPolling();
+      }
       log('Simulazione arrestata.', 'info');
     }
 
-    // Gestione Connessione Web Bluetooth per Vgate iCar Pro BLE
+    // Invio raw su caratteristica BLE
+    async function writeRawBle(dataStr) {
+      if (!writeCharacteristic) throw new Error('Caratteristica di scrittura BLE non disponibile');
+      const encoder = new TextEncoder();
+      const payload = encoder.encode(dataStr + '\r');
+      if (writeCharacteristic.writeValueWithoutResponse) {
+        await writeCharacteristic.writeValueWithoutResponse(payload);
+      } else {
+        await writeCharacteristic.writeValue(payload);
+      }
+    }
+
+    // Coda comandi ELM327 con attesa del prompt '>'
+    function sendObdCommand(cmd, timeoutMs = 2200) {
+      return new Promise((resolve) => {
+        commandQueue.push({ cmd, timeoutMs, resolve });
+        processCommandQueue();
+      });
+    }
+
+    async function processCommandQueue() {
+      if (isProcessingCommand || commandQueue.length === 0 || !isConnected) return;
+      isProcessingCommand = true;
+      const { cmd, timeoutMs, resolve } = commandQueue.shift();
+      rxBuffer = '';
+      log(`TX -> ${cmd}`, 'tx');
+
+      currentResolver = (val) => {
+        if (responseTimeout) {
+          clearTimeout(responseTimeout);
+          responseTimeout = null;
+        }
+        currentResolver = null;
+        isProcessingCommand = false;
+        resolve(val);
+        processCommandQueue();
+      };
+
+      responseTimeout = setTimeout(() => {
+        const partial = rxBuffer.trim();
+        rxBuffer = '';
+        log(`Timeout su "${cmd}" (rx: "${partial || 'vuoto'}")`, 'warn');
+        if (currentResolver) currentResolver(partial);
+      }, timeoutMs);
+
+      try {
+        await writeRawBle(cmd);
+      } catch (err) {
+        log(`Errore invio "${cmd}": ${err.message}`, 'error');
+        if (currentResolver) currentResolver('');
+      }
+    }
+
+    // Listener notifiche BLE in arrivo dall'adattatore Vgate
+    function handleBleNotification(event) {
+      const decoder = new TextDecoder();
+      const chunk = decoder.decode(event.target.value, { stream: true });
+      rxBuffer += chunk;
+
+      if (rxBuffer.includes('>') && currentResolver) {
+        const cleaned = rxBuffer
+          .replace(/>/g, '')
+          .replace(/SEARCHING\.\.\./gi, '')
+          .trim();
+        rxBuffer = '';
+        log(`RX <- ${cleaned.replace(/\r?\n/g, ' | ')}`, 'rx');
+        currentResolver(cleaned);
+      }
+    }
+
+    // Estrae byte esadecimali puliti ignorando intestazioni CAN o righe di testo
+    function extractHexBytes(rawResponse, expectedHeaderPrefix = null) {
+      if (!rawResponse) return [];
+      if (/NO DATA|ERROR|STOPPED|UNABLE TO CONNECT|\?/i.test(rawResponse)) return [];
+
+      const lines = rawResponse.split(/[\r\n]+/).map(l => l.trim()).filter(Boolean);
+      const bytes = [];
+
+      for (const line of lines) {
+        const tokens = line.replace(/[^0-9A-Fa-f\s]/g, ' ').trim().split(/\s+/).filter(t => /^[0-9A-Fa-f]{2}$/.test(t));
+        if (tokens.length === 0) continue;
+
+        if (expectedHeaderPrefix) {
+          const idx = tokens.findIndex(t => t.toUpperCase() === expectedHeaderPrefix.toUpperCase());
+          if (idx !== -1) {
+            for (let i = idx; i < tokens.length; i++) {
+              bytes.push(parseInt(tokens[i], 16));
+            }
+          }
+        } else {
+          for (const t of tokens) {
+            bytes.push(parseInt(t, 16));
+          }
+        }
+      }
+      return bytes;
+    }
+
+    // Decodifica VIN da risposta Mode 09 PID 02
+    function parseVinResponse(raw) {
+      if (!raw || /NO DATA|ERROR|\?/i.test(raw)) return '';
+      const hexPairs = raw.match(/\b[0-9A-Fa-f]{2}\b/g) || [];
+      let ascii = '';
+      for (const h of hexPairs) {
+        const code = parseInt(h, 16);
+        if (code >= 48 && code <= 90) { // A-Z, 0-9
+          ascii += String.fromCharCode(code);
+        }
+      }
+      const vinMatch = ascii.match(/[A-HJ-NPR-Z0-9]{17}/);
+      return vinMatch ? vinMatch[0] : '';
+    }
+
+    // Inizializzazione ELM327 + rilevamento VIN
+    async function initializeObdAndVin() {
+      log('Inizializzazione Vgate ELM327...', 'info');
+      await sendObdCommand('AT Z', 2500);
+      await sendObdCommand('AT E0', 1200);
+      await sendObdCommand('AT L0', 1200);
+      await sendObdCommand('AT S0', 1200);
+      await sendObdCommand('AT SP 0', 1500);
+      await sendObdCommand('AT H1', 1200);
+
+      // Prova a leggere il VIN (09 02)
+      const vinRaw = await sendObdCommand('09 02', 2500);
+      const detectedVin = parseVinResponse(vinRaw);
+      if (detectedVin) {
+        telemetry.vin = detectedVin;
+        log(`VIN rilevato: ${detectedVin}`, 'info');
+        if (vehicleProfileSelect.value === 'AUTO') {
+          if (detectedVin.startsWith('WVW') || detectedVin.startsWith('WVG') || detectedVin.startsWith('WAU') || detectedVin.startsWith('TRU')) {
+            vehicleProfileSelect.value = 'VW_TROC_20';
+            vehicleName.innerText = `Gruppo VAG (${detectedVin}) - Profilo VW T-Roc`;
+          } else {
+            vehicleProfileSelect.value = 'GENERIC_OBD';
+            vehicleName.innerText = `Veicolo VIN ${detectedVin} - Profilo OBD2 Generico`;
+          }
+        }
+      } else {
+        if (vehicleProfileSelect.value === 'AUTO') {
+          vehicleProfileSelect.value = 'VW_TROC_20';
+          vehicleName.innerText = 'VW T-Roc / OBD2 Connesso (VIN non letto)';
+        }
+      }
+    }
+
+    // Ciclo periodico di lettura parametri
+    async function pollTelemetryCycle() {
+      if (!isConnected || isSimulationMode || isProcessingCommand) return;
+
+      const profile = vehicleProfileSelect.value;
+
+      // 1. Liquido refrigerante (OBD-II Standard Mode 01 PID 05)
+      await sendObdCommand('AT SH 7DF', 1000);
+      const coolRaw = await sendObdCommand('01 05', 1800);
+      const coolBytes = extractHexBytes(coolRaw, '41');
+      const coolIdx = coolBytes.indexOf(0x05);
+      if (coolIdx !== -1 && coolBytes.length > coolIdx + 1) {
+        telemetry.coolantTemp = coolBytes[coolIdx + 1] - 40;
+      }
+
+      // 2. Temperatura olio motore (OBD-II Standard Mode 01 PID 5C)
+      const oilTempRaw = await sendObdCommand('01 5C', 1800);
+      const oilTempBytes = extractHexBytes(oilTempRaw, '41');
+      const oilIdx = oilTempBytes.indexOf(0x5C);
+      if (oilIdx !== -1 && oilTempBytes.length > oilIdx + 1) {
+        telemetry.oilTemp = oilTempBytes[oilIdx + 1] - 40;
+      }
+
+      // 3. Query UDS VAG se profilo T-Roc / VAG attivo
+      if (profile === 'VW_TROC_20' || profile === 'AUTO') {
+        await sendObdCommand('AT SH 7E0', 1000);
+
+        // Massa fuliggine DPF (es. 22 11 4F)
+        const sootRaw = await sendObdCommand('22 11 4F', 2000);
+        const sootBytes = extractHexBytes(sootRaw, '62');
+        if (sootBytes.length >= 5 && sootBytes[1] === 0x11 && sootBytes[2] === 0x4F) {
+          const rawVal = (sootBytes[3] << 8) + sootBytes[4];
+          telemetry.dpfSootGrams = Number((rawVal * 0.01).toFixed(2));
+        }
+
+        // Stato rigenerazione DPF (es. 22 02 C3)
+        const regenRaw = await sendObdCommand('22 02 C3', 2000);
+        const regenBytes = extractHexBytes(regenRaw, '62');
+        if (regenBytes.length >= 4 && regenBytes[1] === 0x02 && regenBytes[2] === 0xC3) {
+          telemetry.dpfRegenActive = regenBytes[3] > 0;
+        }
+
+        // Livello olio mm (es. 22 20 2F)
+        const oilLvlRaw = await sendObdCommand('22 20 2F', 2000);
+        const oilLvlBytes = extractHexBytes(oilLvlRaw, '62');
+        if (oilLvlBytes.length >= 5 && oilLvlBytes[1] === 0x20 && oilLvlBytes[2] === 0x2F) {
+          const rawMm = (oilLvlBytes[3] << 8) + oilLvlBytes[4];
+          telemetry.oilLevelMm = Number((rawMm * 0.1).toFixed(1));
+        }
+
+        // Vita residua olio % (es. 22 02 A4)
+        const oilLifeRaw = await sendObdCommand('22 02 A4', 2000);
+        const oilLifeBytes = extractHexBytes(oilLifeRaw, '62');
+        if (oilLifeBytes.length >= 4 && oilLifeBytes[1] === 0x02 && oilLifeBytes[2] === 0xA4) {
+          telemetry.oilLifePercent = Math.min(100, Math.max(0, oilLifeBytes[3]));
+        }
+      }
+
+      render();
+    }
+
+    function startPolling() {
+      stopPolling();
+      pollTelemetryCycle();
+      pollInterval = setInterval(() => {
+        pollTelemetryCycle();
+      }, 3500);
+    }
+
+    function stopPolling() {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
+      commandQueue = [];
+      isProcessingCommand = false;
+    }
+
+    // Trova automaticamente caratteristiche Write e Notify su qualunque servizio UART/OBD BLE del Vgate
+    async function setupBleCharacteristics(server) {
+      const services = await server.getPrimaryServices();
+      writeCharacteristic = null;
+      notifyCharacteristic = null;
+
+      for (const service of services) {
+        log(`Servizio GATT trovato: ${service.uuid}`, 'info');
+        const chars = await service.getCharacteristics();
+        for (const ch of chars) {
+          const props = ch.properties;
+          if (!notifyCharacteristic && (props.notify || props.indicate)) {
+            notifyCharacteristic = ch;
+            await ch.startNotifications();
+            ch.addEventListener('characteristicvaluechanged', handleBleNotification);
+            log(`Notify attivo su: ${ch.uuid}`, 'info');
+          }
+          if (!writeCharacteristic && (props.writeWithoutResponse || props.write)) {
+            writeCharacteristic = ch;
+            log(`Write pronto su: ${ch.uuid}`, 'info');
+          }
+        }
+      }
+
+      if (!writeCharacteristic || !notifyCharacteristic) {
+        throw new Error('Caratteristiche BLE TX/RX non trovate sull\'adattatore.');
+      }
+    }
+
+    // Gestione Connessione / Disconnessione Web Bluetooth per Vgate iCar Pro BLE
     async function connectBluetooth() {
+      if (isConnected && bleDevice) {
+        try {
+          stopPolling();
+          if (bleDevice.gatt && bleDevice.gatt.connected) {
+            bleDevice.gatt.disconnect();
+          }
+        } catch (e) {}
+        return;
+      }
+
       if (!navigator.bluetooth) {
         showToast('Web Bluetooth non supportato', 'Usa Chrome o Edge su Android/PC.', 'error');
         return;
       }
+
       try {
+        if (isSimulationMode) {
+          simToggle.checked = false;
+          stopSimulation();
+        }
+
         log('Ricerca adattatore Vgate iCar BLE...', 'info');
         bleDevice = await navigator.bluetooth.requestDevice({
           acceptAllDevices: true,
           optionalServices: [
-            '000018f0-0000-1000-8000-00805f9b34fb', 
+            '000018f0-0000-1000-8000-00805f9b34fb',
             '0000fff0-0000-1000-8000-00805f9b34fb',
-            'e7810a71-73ae-499d-8c15-faa9aef0c3f2' // UUID Trasparente Vgate BLE
+            '0000ffe0-0000-1000-8000-00805f9b34fb',
+            'e7810a71-73ae-499d-8c15-faa9aef0c3f2',
+            '49535343-fe7d-4ae5-8fa9-9fafd205e455',
+            '6e400001-b5a3-f393-e0a9-e50e24dcca9e'
           ]
         });
 
         bleDevice.addEventListener('gattserverdisconnected', () => {
           isConnected = false;
-          if (pollInterval) clearInterval(pollInterval);
+          stopPolling();
           bleStatusDot.className = 'w-2 h-2 rounded-full bg-slate-600';
           bleStatusText.innerText = 'DISCONNESSO';
+          if (btnConnectLabel) btnConnectLabel.innerText = 'CONNETTI BLE';
           showToast('Disconnesso', 'Connessione OBD persa', 'warn');
+          log('Dispositivo BLE disconnesso.', 'warn');
         });
 
         gattServer = await bleDevice.gatt.connect();
         isConnected = true;
         bleStatusDot.className = 'w-2 h-2 rounded-full bg-emerald-400 animate-pulse';
         bleStatusText.innerText = 'CONNESSO (BLE)';
-        showToast('OBD Connesso!', 'Adattatore pronto alla lettura', 'success');
+        if (btnConnectLabel) btnConnectLabel.innerText = 'DISCONNETTI';
 
-        log(`Dispositivo GATT connesso: ${bleDevice.name}`, 'info');
-        vehicleName.innerText = 'VW T-Roc 2.0 TDI (Connessione OBD Attiva)';
-        vehicleProfileSelect.value = 'VW_TROC_20';
-        
+        log(`Dispositivo GATT connesso: ${bleDevice.name || 'Vgate BLE'}`, 'info');
+        await setupBleCharacteristics(gattServer);
+        showToast('OBD Connesso!', 'Avvio lettura centralina...', 'success');
+
+        await initializeObdAndVin();
+        startPolling();
+
       } catch (e) {
+        isConnected = false;
+        stopPolling();
+        bleStatusDot.className = 'w-2 h-2 rounded-full bg-slate-600';
+        bleStatusText.innerText = 'DISCONNESSO';
+        if (btnConnectLabel) btnConnectLabel.innerText = 'CONNETTI BLE';
         log(`Errore Connessione: ${e.message}`, 'error');
+        showToast('Errore BLE', e.message, 'error');
       }
     }
 
@@ -533,7 +866,6 @@
 
     // Inizializzazione Eventi al Caricamento
     window.addEventListener('DOMContentLoaded', () => {
-      // Inizializzazione immediata della voce del browser
       if ('speechSynthesis' in window) {
         window.speechSynthesis.onvoiceschanged = () => {
           window.speechSynthesis.getVoices();
@@ -547,7 +879,6 @@
         else stopSimulation();
       });
 
-      // Il pulsante di TEST serve anche a sbloccare l'AudioContext su iOS e Android
       btnTestVoice.addEventListener('click', () => {
         playAlarm();
         speakText("Test del sistema audio completato. Attenzione, rigenerazione D P F in corso. Non spegnere il motore.");
@@ -568,6 +899,14 @@
 
       document.getElementById('btn-toggle-log').addEventListener('click', () => {
         consoleLogBox.classList.toggle('hidden');
+      });
+
+      vehicleProfileSelect.addEventListener('change', () => {
+        const val = vehicleProfileSelect.value;
+        if (val === 'VW_TROC_20') vehicleName.innerText = 'VW T-Roc 2.0 TDI (Profilo UDS VAG)';
+        else if (val === 'GENERIC_OBD') vehicleName.innerText = 'Profilo OBD2 Generico Standard';
+        else vehicleName.innerText = 'Auto-Rilevamento VIN Attivo';
+        if (isConnected && !isSimulationMode) pollTelemetryCycle();
       });
 
       render();
