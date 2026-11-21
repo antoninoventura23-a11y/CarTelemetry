@@ -127,6 +127,7 @@
           <option value="VW_TROC_20">VW T-Roc 2.0 TDI (UDS Bosch)</option>
           <option value="GENERIC_OBD">OBD2 Generico Standard</option>
         </select>
+        <button id="btn-scan-cluster" class="bg-slate-800 hover:bg-slate-700 text-amber-400 px-2 py-1 rounded-xl text-xs font-mono" title="Cerca DID sulla centralina strumenti (0x17), sola lettura">SCAN 0x17</button>
         <button id="btn-toggle-log" class="bg-slate-800 hover:bg-slate-700 text-slate-400 px-2 py-1 rounded-xl text-xs font-mono">
           LOG
         </button>
@@ -280,6 +281,22 @@
     // Testo mostrato quando un valore non arriva: distingue "non collegato" da "collegato ma nessun dato"
     function noDataText() {
       return isConnected ? 'NESSUN DATO' : 'IN ATTESA';
+    }
+
+    // Durante una scansione DID il polling è sospeso
+    let scanning = false;
+
+    // Sceglie la centralina a cui inviare le richieste UDS.
+    // Motore = 7E0 (risposta 7E8). Strumenti = 0x17, richiesta 714, risposta 77E.
+    async function selectModule(target, fromScan = false) {
+      if (target === 'cluster') {
+        await sendObdCommand('AT SH 714', 900, fromScan);
+        await sendObdCommand('AT CRA 77E', 900, fromScan);
+        await sendObdCommand('10 03', 1200, fromScan); // sessione estesa, sola lettura
+      } else {
+        await sendObdCommand('AT SH 7E0', 900, fromScan);
+        await sendObdCommand('AT CRA 7E8', 900, fromScan);
+      }
     }
 
     // Helper per l'aggiornamento grafico dei radial gauges SVG
@@ -558,7 +575,8 @@
     }
 
     // Coda comandi ELM327 con attesa del prompt '>'
-    function sendObdCommand(cmd, timeoutMs = 2200) {
+    function sendObdCommand(cmd, timeoutMs = 2200, fromScan = false) {
+      if (scanning && !fromScan) return Promise.resolve('');
       return new Promise((resolve) => {
         commandQueue.push({ cmd, timeoutMs, resolve });
         processCommandQueue();
@@ -724,7 +742,7 @@
 
     // Ciclo periodico di lettura parametri
     async function pollTelemetryCycle() {
-      if (!isConnected || isSimulationMode || isProcessingCommand) return;
+      if (!isConnected || isSimulationMode || isProcessingCommand || scanning) return;
 
       const profile = vehicleProfileSelect.value;
 
@@ -749,8 +767,7 @@
 
       // 3. Query UDS VAG se profilo T-Roc / VAG attivo
       if (profile === 'VW_TROC_20' || profile === 'AUTO') {
-        await sendObdCommand('AT SH 7E0', 900);
-        await sendObdCommand('10 03', 1200); // sessione diagnostica estesa (solo lettura)
+        await selectModule('engine');
 
         // Temperatura olio via UDS se Mode 01 5C non ha risposto
         if (telemetry.oilTemp === null) {
@@ -817,7 +834,8 @@
           }
         }
 
-        // Livello olio mm
+        // Livello olio: centralina strumenti 0x17. I DID sono ipotesi da verificare con SCAN 0x17.
+        await selectModule('cluster');
         for (const did of ['202F', '1156', '02A6']) {
           const d = await queryUdsDid(did, 1300);
           if (d && d.length >= 2) {
@@ -840,9 +858,50 @@
             break;
           }
         }
+        await selectModule('engine');
       }
 
       render();
+    }
+
+    // Scansione DID sulla centralina strumenti 0x17 (solo servizio 0x22 = lettura).
+    // Registra nel LOG ogni DID che risponde con dati validi.
+    async function scanClusterDids(fromDid = 0x2000, toDid = 0x20FF) {
+      if (!isConnected || isSimulationMode) {
+        showToast('Scansione non disponibile', 'Collegati al veicolo (non in SIM).', 'warn');
+        return;
+      }
+      stopPolling();
+      scanning = true;
+      await new Promise(r => setTimeout(r, 2500)); // lascia terminare la richiesta in corso
+
+      log(`SCAN centralina 0x17: DID 0x${fromDid.toString(16).toUpperCase()}-0x${toDid.toString(16).toUpperCase()}`, 'warn');
+      let found = 0;
+      try {
+        await selectModule('cluster', true);
+        for (let did = fromDid; did <= toDid; did++) {
+          const hiByte = (did >> 8) & 0xFF;
+          const loByte = did & 0xFF;
+          const hexDid = hiByte.toString(16).toUpperCase().padStart(2, '0') + loByte.toString(16).toUpperCase().padStart(2, '0');
+          const raw = await sendObdCommand(`22 ${hexDid.slice(0, 2)} ${hexDid.slice(2, 4)}`, 500, true);
+          const bytes = extractHexBytes(raw, '62');
+          for (let i = 0; i <= bytes.length - 3; i++) {
+            if (bytes[i] === 0x62 && bytes[i + 1] === hiByte && bytes[i + 2] === loByte) {
+              const data = bytes.slice(i + 3).map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
+              log(`DID ${hexDid} -> ${data || '(vuoto)'}`, 'rx');
+              found++;
+              break;
+            }
+          }
+        }
+      } finally {
+        await selectModule('engine', true);
+        scanning = false;
+      }
+
+      log(`SCAN completata: ${found} DID con risposta`, 'warn');
+      showToast('Scansione completata', `${found} DID con risposta (vedi LOG)`, 'success');
+      if (isConnected) startPolling();
     }
 
     function startPolling() {
@@ -1001,6 +1060,8 @@
         audioMuted = !audioMuted;
         document.getElementById('audio-icon').className = audioMuted ? 'fa-solid fa-bell-slash text-slate-500' : 'fa-solid fa-bell text-orange-400';
       });
+
+      document.getElementById('btn-scan-cluster').addEventListener('click', () => scanClusterDids());
 
       document.getElementById('btn-toggle-log').addEventListener('click', () => {
         consoleLogBox.classList.toggle('hidden');
