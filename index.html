@@ -128,6 +128,7 @@
           <option value="GENERIC_OBD">OBD2 Generico Standard</option>
         </select>
         <button id="btn-scan-cluster" class="bg-slate-800 hover:bg-slate-700 text-amber-400 px-2 py-1 rounded-xl text-xs font-mono" title="Cerca DID sulla centralina strumenti (0x17), sola lettura">SCAN 0x17</button>
+        <button id="btn-export-log" class="bg-slate-800 hover:bg-slate-700 text-emerald-400 px-2 py-1 rounded-xl text-xs font-mono" title="Scarica il log come file di testo">EXPORT</button>
         <button id="btn-toggle-log" class="bg-slate-800 hover:bg-slate-700 text-slate-400 px-2 py-1 rounded-xl text-xs font-mono">
           LOG
         </button>
@@ -396,7 +397,7 @@
       el.className = type === 'tx' ? 'text-cyan-400' : type === 'rx' ? 'text-emerald-400' : type === 'warn' ? 'text-amber-400' : type === 'error' ? 'text-red-400' : 'text-slate-400';
       el.innerHTML = `<span class="text-slate-600">[${time}]</span> ${msg}`;
       consoleLogBox.appendChild(el);
-      while (consoleLogBox.children.length > 120) {
+      while (consoleLogBox.children.length > 3000) {
         consoleLogBox.removeChild(consoleLogBox.firstChild);
       }
       consoleLogBox.scrollTop = consoleLogBox.scrollHeight;
@@ -864,6 +865,29 @@
       render();
     }
 
+    // Esporta il contenuto del LOG in un file di testo scaricabile
+    function exportLog() {
+      const lines = Array.from(consoleLogBox.children).map(el => el.innerText);
+      if (lines.length === 0) {
+        showToast('Log vuoto', 'Nessuna riga da esportare.', 'warn');
+        return;
+      }
+      const header = `VAG Telemetry - log esportato il ${new Date().toLocaleString('it-IT')}\n` +
+                     `Veicolo: ${vehicleName.innerText}\n` +
+                     `Profilo: ${vehicleProfileSelect.value}\n` +
+                     '----------------------------------------\n';
+      const blob = new Blob([header + lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `obd2_log_${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      showToast('Log esportato', 'File di testo scaricato', 'success');
+    }
+
     // Scansione DID sulla centralina strumenti 0x17 (solo servizio 0x22 = lettura).
     // Registra nel LOG ogni DID che risponde con dati validi.
     async function scanClusterDids(fromDid = 0x2000, toDid = 0x20FF) {
@@ -1062,6 +1086,7 @@
       });
 
       document.getElementById('btn-scan-cluster').addEventListener('click', () => scanClusterDids());
+      document.getElementById('btn-export-log').addEventListener('click', exportLog);
 
       document.getElementById('btn-toggle-log').addEventListener('click', () => {
         consoleLogBox.classList.toggle('hidden');
