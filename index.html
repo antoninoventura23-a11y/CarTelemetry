@@ -232,6 +232,31 @@
         </div>
         <div class="text-xs font-bold text-slate-400 font-mono">Tagliando tra: <span id="sub-service-km" class="text-slate-200">-- km</span></div>
       </div>
+
+      <!-- 7. Batteria -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 flex flex-col items-center justify-between text-center relative overflow-hidden">
+        <div class="text-[11px] font-bold text-slate-400 font-orbitron uppercase tracking-wider">BATTERIA</div>
+        <div class="w-full my-3 flex flex-col items-center">
+          <div id="val-batt-volt" class="text-2xl font-black font-orbitron text-slate-100 mb-1">-- V</div>
+          <div id="val-batt-state" class="text-xs font-black font-mono text-slate-400 mb-2">IN ATTESA</div>
+          <div class="w-full bg-slate-800 h-3 rounded-full overflow-hidden p-0.5 border border-slate-700">
+            <div id="bar-batt" class="bg-gradient-to-r from-red-500 via-amber-400 to-emerald-400 h-full rounded-full transition-all duration-500" style="width: 0%"></div>
+          </div>
+        </div>
+        <div class="text-[10px] font-bold text-slate-400 font-mono flex justify-between w-full px-1">
+          <span>SCARICA</span>
+          <span>PIENA</span>
+        </div>
+      </div>
+
+      <!-- 8. Pressione Olio Motore -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 flex flex-col items-center justify-between text-center relative overflow-hidden">
+        <div class="text-[11px] font-bold text-slate-400 font-orbitron uppercase tracking-wider">PRESSIONE OLIO</div>
+        <div class="my-3 flex flex-col items-center">
+          <div id="val-oil-press" class="text-2xl font-black font-orbitron text-slate-100 mb-1">-- bar</div>
+        </div>
+        <div id="sub-oil-press" class="text-xs font-bold text-slate-400 font-mono">NON CONFIGURATA</div>
+      </div>
     </div>
 
     <!-- Terminal Log Console Box -->
@@ -278,6 +303,10 @@
     // Capacità di riferimento del filtro DPF per calcolare la percentuale di intasamento.
     // È una STIMA: regola questo valore in base al tuo filtro/centralina.
     const DPF_LIMIT_GRAMS = 30;
+
+    // Pressione olio: il DID NON è ancora noto. Dopo SCAN 0x17 inserisci qui il codice trovato.
+    // Valore in bar = byte * scale + offset. did: null = non configurata.
+    const OIL_PRESSURE = { did: null, bytes: 1, scale: 1, offset: 0, minOk: 1.0 };
 
     // Testo mostrato quando un valore non arriva: distingue "non collegato" da "collegato ma nessun dato"
     function noDataText() {
@@ -374,6 +403,9 @@
       oilLevelMm: null,
       oilLevelLiters: null,
       oilLifePercent: null,
+      batteryVolt: null,
+      oilPressureBar: null,
+      clusterRaw202F: null,
       vin: ''
     };
 
@@ -490,7 +522,9 @@
         document.getElementById('bar-oil-level').style.width = `${pct}%`;
       } else {
         document.getElementById('val-oil-mm').innerText = '-- mm';
-        document.getElementById('val-oil-liters').innerText = noDataText();
+        document.getElementById('val-oil-liters').innerText = telemetry.clusterRaw202F !== null
+          ? `GREZZO 202F: ${telemetry.clusterRaw202F}`
+          : noDataText();
         document.getElementById('bar-oil-level').style.width = '0%';
       }
 
@@ -503,6 +537,35 @@
         document.getElementById('val-oil-degrade').innerText = '--';
         updateGauge('gauge-oil-degrade', 0, 0, 100, '#10b981');
         document.getElementById('sub-service-km').innerText = '-- km';
+      }
+
+      // 7. Batteria: soglie approssimative per batteria 12 V a piombo/AGM
+      if (telemetry.batteryVolt !== null) {
+        const v = telemetry.batteryVolt;
+        let bState = 'SCARICA';
+        let bClass = 'text-amber-400';
+        if (v >= 13.2) { bState = 'IN CARICA'; bClass = 'text-cyan-400'; }
+        else if (v >= 12.4) { bState = 'OTTIMA'; bClass = 'text-emerald-400'; }
+        else if (v < 12.0) { bState = 'CRITICA'; bClass = 'text-red-400'; }
+        document.getElementById('val-batt-volt').innerText = `${v.toFixed(2)} V`;
+        document.getElementById('val-batt-state').innerText = bState;
+        document.getElementById('val-batt-state').className = `text-xs font-black font-mono ${bClass}`;
+        const bPct = Math.min(100, Math.max(0, ((v - 11.8) / (12.7 - 11.8)) * 100));
+        document.getElementById('bar-batt').style.width = `${bPct}%`;
+      } else {
+        document.getElementById('val-batt-volt').innerText = '-- V';
+        document.getElementById('val-batt-state').innerText = noDataText();
+        document.getElementById('val-batt-state').className = 'text-xs font-black font-mono text-slate-400';
+        document.getElementById('bar-batt').style.width = '0%';
+      }
+
+      // 8. Pressione olio (solo se configurata)
+      if (telemetry.oilPressureBar !== null) {
+        document.getElementById('val-oil-press').innerText = `${telemetry.oilPressureBar.toFixed(2)} bar`;
+        document.getElementById('sub-oil-press').innerText = telemetry.oilPressureBar < OIL_PRESSURE.minOk ? 'BASSA!' : 'OK';
+      } else {
+        document.getElementById('val-oil-press').innerText = '-- bar';
+        document.getElementById('sub-oil-press').innerText = OIL_PRESSURE.did ? noDataText() : 'NON CONFIGURATA';
       }
     }
 
@@ -757,6 +820,15 @@
         render();
       }
 
+      // 1b. Tensione batteria (OBD-II standard Mode 01 PID 42: (A*256+B)/1000 V)
+      const battRaw = await sendObdCommand('01 42', 1500);
+      const battBytes = extractHexBytes(battRaw, '41');
+      const battIdx = battBytes.indexOf(0x42);
+      if (battIdx !== -1 && battBytes.length > battIdx + 2) {
+        telemetry.batteryVolt = Number((((battBytes[battIdx + 1] << 8) + battBytes[battIdx + 2]) / 1000).toFixed(2));
+        render();
+      }
+
       // 2. Temperatura olio motore (OBD-II Standard Mode 01 PID 5C)
       const oilTempRaw = await sendObdCommand('01 5C', 1500);
       const oilTempBytes = extractHexBytes(oilTempRaw, '41');
@@ -803,6 +875,10 @@
           const d = await queryUdsDid(did, 1400);
           if (d && d.length >= 2) {
             const rawVal = (d[0] << 8) + d[1];
+            if (rawVal === 0) {
+              log(`DID ${did} = 00 00: ignorato (non plausibile come massa di fuliggine)`, 'warn');
+              continue;
+            }
             const grams = Number((rawVal * 0.01).toFixed(2));
             if (grams >= 0 && grams <= 120) {
               telemetry.dpfSootGrams = grams;
@@ -835,9 +911,13 @@
           }
         }
 
-        // Livello olio: centralina strumenti 0x17. I DID sono ipotesi da verificare con SCAN 0x17.
+        // Centralina strumenti 0x17 (qui risponde, vedi log)
         await selectModule('cluster');
-        for (const did of ['202F', '1156', '02A6']) {
+        // 202F risponde con 1 byte: lo mostriamo come valore grezzo, senza attribuirgli un significato
+        const raw202F = await queryUdsDid('202F', 1300);
+        telemetry.clusterRaw202F = raw202F && raw202F.length === 1 ? raw202F[0] : null;
+        // Livello in mm: DID a due byte ancora da confermare
+        for (const did of ['1156', '02A6']) {
           const d = await queryUdsDid(did, 1300);
           if (d && d.length >= 2) {
             const rawMm = ((d[0] << 8) + d[1]) * 0.1;
@@ -857,6 +937,15 @@
             telemetry.oilLifePercent = Math.min(100, Math.max(0, d[0]));
             render();
             break;
+          }
+        }
+        // Pressione olio (solo se configurata in OIL_PRESSURE), letta dalla centralina strumenti
+        if (OIL_PRESSURE.did) {
+          const dp = await queryUdsDid(OIL_PRESSURE.did, 1300);
+          if (dp && dp.length >= OIL_PRESSURE.bytes) {
+            const rawP = OIL_PRESSURE.bytes === 2 ? (dp[0] << 8) + dp[1] : dp[0];
+            telemetry.oilPressureBar = Number((rawP * OIL_PRESSURE.scale + OIL_PRESSURE.offset).toFixed(2));
+            render();
           }
         }
         await selectModule('engine');
