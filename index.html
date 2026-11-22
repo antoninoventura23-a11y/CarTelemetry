@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>VAG Telemetry PRO - OBD2 Smartphone Dashboard</title>
+  <title>Car Telemetry - OBD2 Dashboard</title>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- FontAwesome Icons -->
@@ -169,7 +169,7 @@
   <!-- App installabile: icona e nome dedicati quando il dashboard viene aggiunto alla schermata Home -->
   <meta name="theme-color" content="#020617">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-title" content="VAG Telemetry">
+  <meta name="apple-mobile-web-app-title" content="Car Telemetry">
   <meta name="mobile-web-app-capable" content="yes">
   <script>
     // Crea in memoria l'icona e il manifest, così non servono file aggiuntivi.
@@ -211,8 +211,8 @@
       const scopePath = pagePath.replace(/[^/]*$/, '');
 
       const manifest = {
-        name: 'VAG Telemetry PRO',
-        short_name: 'VAG Telemetry',
+        name: 'Car Telemetry',
+        short_name: 'Car Telemetry',
         start_url: pagePath,
         scope: scopePath,
         display: 'standalone',
@@ -248,7 +248,7 @@
       </div>
       <div>
         <h1 class="text-sm sm:text-base font-extrabold font-orbitron tracking-wider text-cyan-400 leading-none">
-          VAG TELEMETRY
+          CAR TELEMETRY
         </h1>
         <div class="text-[10px] font-mono text-slate-400 flex items-center gap-1.5 mt-0.5">
           <span id="ble-status-dot" class="w-2 h-2 rounded-full bg-slate-600"></span>
@@ -311,15 +311,14 @@
       <div class="flex items-center gap-2">
         <i class="fa-solid fa-car text-cyan-400"></i>
         <span id="vehicle-name" class="font-bold text-xs sm:text-sm text-slate-200">Seleziona Veicolo o Connetti OBD</span>
+        <span id="vehicle-status" class="block text-[10px] font-mono text-amber-400"></span>
       </div>
       <div class="flex items-center gap-2">
         <select id="vehicle-profile-select" class="bg-slate-950 border border-slate-700 text-xs text-slate-300 rounded-xl px-2.5 py-1 font-mono focus:outline-none focus:border-cyan-500">
           <option value="AUTO">Auto-Rilevamento VIN</option>
-          <option value="VW_TROC_20">VW T-Roc 2.0 TDI (UDS Bosch)</option>
+          <option value="VW_TROC_20">Gruppo VAG (UDS: VW, Audi, Škoda, SEAT)</option>
           <option value="GENERIC_OBD">OBD2 Generico Standard</option>
         </select>
-        <button id="btn-voice-files" class="bg-slate-800 hover:bg-slate-700 text-cyan-300 px-2 py-1 rounded-xl text-xs font-mono" title="Carica le tue frasi registrate (file audio con il nome della frase)">VOCE MIA</button>
-        <input type="file" id="voice-file-input" accept="audio/*" multiple class="hidden">
         <button id="btn-scan-cluster" class="bg-slate-800 hover:bg-slate-700 text-amber-400 px-2 py-1 rounded-xl text-xs font-mono" title="Cerca DID sulla centralina strumenti (0x17), sola lettura">SCAN 0x17</button>
         <button id="btn-scan-engine" class="bg-slate-800 hover:bg-slate-700 text-amber-400 px-2 py-1 rounded-xl text-xs font-mono" title="Cerca DID sulla centralina motore (7E0), sola lettura">SCAN MOTORE</button>
         <button id="btn-scan-std" class="bg-slate-800 hover:bg-slate-700 text-amber-400 px-2 py-1 rounded-xl text-xs font-mono" title="Legge tutti i parametri standard OBD-II supportati dall'auto (funziona su qualsiasi auto)">PID STANDARD</button>
@@ -327,6 +326,18 @@
         <button id="btn-toggle-log" class="bg-slate-800 hover:bg-slate-700 text-slate-400 px-2 py-1 rounded-xl text-xs font-mono">
           LOG
         </button>
+      </div>
+    </div>
+
+    <!-- Parametri motore standard OBD-II: validi per qualsiasi auto -->
+    <div class="grid grid-cols-2 gap-3">
+      <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-3 flex items-center justify-between">
+        <span class="text-[11px] font-bold text-slate-400 font-orbitron tracking-wider">GIRI</span>
+        <span><span id="val-rpm" class="text-xl font-black font-orbitron text-slate-100">--</span> <span class="text-[10px] text-slate-400 font-mono">rpm</span></span>
+      </div>
+      <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-3 flex items-center justify-between">
+        <span class="text-[11px] font-bold text-slate-400 font-orbitron tracking-wider">VELOCITÀ</span>
+        <span><span id="val-speed" class="text-xl font-black font-orbitron text-slate-100">--</span> <span class="text-[10px] text-slate-400 font-mono">km/h</span></span>
       </div>
     </div>
 
@@ -480,7 +491,7 @@
 
   <script>
     /**
-     * VAG Telemetry PRO - GitHub Pages Ready Single-File Application
+     * Car Telemetry - OBD2 single-file dashboard
      * Web Bluetooth GATT Write/Notify + ELM327 / UDS Polling for Vgate iCar Pro BLE
      */
 
@@ -529,6 +540,11 @@
 
     // Durante una scansione DID il polling è sospeso
     let scanning = false;
+
+    // Informazioni veicolo ricavate dal VIN, e tempi dell'ultima risposta della centralina
+    let vehicleInfo = null;
+    let connectedAtMs = 0;
+    let lastEcuAnswerMs = 0;
 
     // Lettura anomalie: ogni 4 cicli di polling
     let dtcCycle = 0;
@@ -593,48 +609,12 @@
       dpf: 'Attenzione, filtro antiparticolato intasato.',
       oilPressure: 'Attenzione, pressione olio bassa.',
     };
-    const VOICE_STORAGE_KEY = 'vagVoiceClipsV1';
-    let personalVoice = {}; // chiave -> audio registrato (data URL)
-
-    function loadPersonalVoice() {
-      try {
-        const raw = localStorage.getItem(VOICE_STORAGE_KEY);
-        personalVoice = raw ? JSON.parse(raw) : {};
-      } catch (e) {
-        personalVoice = {};
-      }
-      return Object.keys(personalVoice).length;
-    }
-
-    function savePersonalVoice() {
-      try {
-        localStorage.setItem(VOICE_STORAGE_KEY, JSON.stringify(personalVoice));
-        return true;
-      } catch (e) {
-        return false; // memoria piena
-      }
-    }
-
-    // Riproduce una frase: il tuo audio se esiste, altrimenti la voce del telefono
+    // Riproduce una frase con la voce del telefono
     function playVoiceItem(item) {
       return new Promise((resolve) => {
         if (audioMuted || !speechEnabled || !item.text) return resolve();
-        const clip = item.key ? personalVoice[item.key] : null;
-        if (clip) {
-          try {
-            const audio = new Audio(clip);
-            const guard = setTimeout(resolve, 8000); // evita che la coda si blocchi se l'audio non finisce
-            audio.onended = () => { clearTimeout(guard); resolve(); };
-            audio.onerror = () => { clearTimeout(guard); resolve(); };
-            const p = audio.play();
-            if (p && p.catch) p.catch(resolve);
-          } catch (e) {
-            resolve();
-          }
-        } else {
-          speakText(item.text);
-          setTimeout(resolve, Math.min(6000, 600 + item.text.length * 70));
-        }
+        speakText(item.text);
+        setTimeout(resolve, Math.min(6000, 600 + item.text.length * 70));
       });
     }
 
@@ -757,6 +737,8 @@
       oilPressureBar: null,
       clusterRaw202F: null,
       dtcCodes: null,
+      rpm: null,
+      speed: null,
       vin: ''
     };
 
@@ -940,6 +922,20 @@
         dtcSub.title = list.join(', ');
       }
 
+      document.getElementById('val-rpm').innerText = telemetry.rpm !== null ? telemetry.rpm : '--';
+      document.getElementById('val-speed').innerText = telemetry.speed !== null ? telemetry.speed : '--';
+
+      // Avviso se l'auto non risponde da un po'
+      const statusEl = document.getElementById('vehicle-status');
+      if (!isConnected || isSimulationMode) {
+        statusEl.innerText = '';
+      } else {
+        const silentFor = Date.now() - (lastEcuAnswerMs || connectedAtMs);
+        statusEl.innerText = silentFor > 30000
+          ? 'Nessuna risposta dall\'auto: accendi il quadro e attendi'
+          : (lastEcuAnswerMs === 0 ? 'Ricerca della centralina in corso...' : '');
+      }
+
       checkLimits();
     }
 
@@ -949,9 +945,11 @@
       isSimulationMode = true;
       bleStatusDot.className = 'w-2 h-2 rounded-full bg-amber-400 animate-ping';
       bleStatusText.innerText = 'SIMULATORE ATTIVO';
-      vehicleName.innerText = 'VW T-Roc 2.0 TDI 4Motion (2019)';
-      vehicleProfileSelect.value = 'VW_TROC_20';
-      log('Simulazione avviata (Profilo VW T-Roc 2.0 TDI)', 'warn');
+      vehicleInfo = null;
+      vehicleProfileSelect.value = 'GENERIC_OBD';
+      updateVehicleUI();
+      vehicleName.innerText = 'Simulazione (dati di prova)';
+      log('Simulazione avviata (dati di prova)', 'warn');
 
       telemetry.coolantTemp = 88;
       telemetry.oilTemp = 96;
@@ -1145,6 +1143,50 @@
       return null;
     }
 
+    // Marchi riconosciuti dai primi tre caratteri del VIN (WMI)
+    const WMI_BRANDS = {
+      WVW: 'Volkswagen', WVG: 'Volkswagen SUV', WV1: 'Volkswagen Veicoli Commerciali', WV2: 'Volkswagen Veicoli Commerciali',
+      WAU: 'Audi', TRU: 'Audi', TMB: 'Škoda', VSS: 'SEAT', WP0: 'Porsche',
+      ZAR: 'Alfa Romeo', ZFA: 'Fiat', ZFF: 'Ferrari', ZHW: 'Lamborghini',
+      VF1: 'Renault', VF3: 'Peugeot', VF7: 'Citroën', WDD: 'Mercedes-Benz', WBA: 'BMW', WBS: 'BMW M',
+      YV1: 'Volvo', JTD: 'Toyota', JTE: 'Toyota', KMH: 'Hyundai', KNA: 'Kia',
+      '1G1': 'Chevrolet', '1FA': 'Ford', SAL: 'Land Rover',
+    };
+    // Gruppo che usa il profilo di diagnostica UDS (letture dedicate)
+    const VAG_WMI = ['WVW', 'WVG', 'WV1', 'WV2', 'WAU', 'TRU', 'TMB', 'VSS'];
+    // Lettera dell'anno (10° carattere del VIN): ciclo 2010-2030
+    const YEAR_CODES = 'ABCDEFGHJKLMNPRSTVWXY';
+
+    function decodeVin(vin) {
+      const wmi = vin.slice(0, 3);
+      const idx = YEAR_CODES.indexOf(vin.charAt(9));
+      return {
+        vin,
+        brand: WMI_BRANDS[wmi] || 'Marca non riconosciuta',
+        year: idx >= 0 ? 2010 + idx : null,
+        isVag: VAG_WMI.includes(wmi),
+      };
+    }
+
+    // Aggiorna nome veicolo, stato e pulsanti in base al profilo e al VIN
+    function updateVehicleUI() {
+      const profile = vehicleProfileSelect.value;
+      if (vehicleInfo) {
+        const yr = vehicleInfo.year ? ` ${vehicleInfo.year}` : '';
+        vehicleName.innerText = `${vehicleInfo.brand}${yr} · VIN ${vehicleInfo.vin}`;
+      } else if (profile === 'GENERIC_OBD') {
+        vehicleName.innerText = 'Veicolo OBD2 (VIN non letto)';
+      } else if (profile === 'VW_TROC_20') {
+        vehicleName.innerText = 'Gruppo VAG (profilo UDS)';
+      } else {
+        vehicleName.innerText = 'Seleziona Veicolo o Connetti OBD';
+      }
+      const isVag = profile === 'VW_TROC_20';
+      ['btn-scan-cluster', 'btn-scan-engine'].forEach(id => {
+        document.getElementById(id).classList.toggle('hidden', !isVag);
+      });
+    }
+
     // Inizializzazione ELM327 + rilevamento VIN
     async function initializeObdAndVin() {
       log('Inizializzazione Vgate ELM327...', 'info');
@@ -1155,28 +1197,25 @@
       await sendObdCommand('AT SP 0', 1500);
       await sendObdCommand('AT H0', 1200);
 
-      // Prova a leggere il VIN (09 02)
-      const vinRaw = await sendObdCommand('09 02', 2500);
+      // Il primo comando può richiedere fino a 20 s: l'adattatore sta cercando il protocollo dell'auto
+      vehicleInfo = null;
+      connectedAtMs = Date.now();
+      lastEcuAnswerMs = 0;
+      const vinRaw = await sendObdCommand('09 02', 20000);
       const detectedVin = parseVinResponse(vinRaw);
       if (detectedVin) {
         telemetry.vin = detectedVin;
-        log(`VIN rilevato: ${detectedVin}`, 'info');
+        vehicleInfo = decodeVin(detectedVin);
+        const yr = vehicleInfo.year ? ` ${vehicleInfo.year}` : '';
+        log(`VIN rilevato: ${detectedVin} (${vehicleInfo.brand}${yr})`, 'info');
         if (vehicleProfileSelect.value === 'AUTO') {
-          if (detectedVin.startsWith('WVW') || detectedVin.startsWith('WVG') || detectedVin.startsWith('WAU') || detectedVin.startsWith('TRU')) {
-            vehicleProfileSelect.value = 'VW_TROC_20';
-            vehicleName.innerText = `Gruppo VAG (${detectedVin}) - Profilo VW T-Roc`;
-          } else {
-            vehicleProfileSelect.value = 'GENERIC_OBD';
-            vehicleName.innerText = `Veicolo VIN ${detectedVin} - Profilo OBD2 Generico`;
-          }
+          vehicleProfileSelect.value = vehicleInfo.isVag ? 'VW_TROC_20' : 'GENERIC_OBD';
         }
       } else {
-        // VIN non letto: non assumiamo più una VW. Profilo generico, le letture VAG restano disattivate.
-        if (vehicleProfileSelect.value === 'AUTO') {
-          vehicleProfileSelect.value = 'GENERIC_OBD';
-          vehicleName.innerText = 'OBD2 Connesso (VIN non letto): profilo generico';
-        }
+        log('VIN non letto: uso il profilo generico', 'warn');
+        if (vehicleProfileSelect.value === 'AUTO') vehicleProfileSelect.value = 'GENERIC_OBD';
       }
+      updateVehicleUI();
     }
 
     // Ciclo periodico di lettura parametri
@@ -1243,6 +1282,19 @@
         render();
       }
 
+      // 1d. Giri motore (PID 0C) e velocità (PID 0D), standard su qualsiasi auto
+      const rpmBytes = extractHexBytes(await sendObdCommand('01 0C', 1200), '41');
+      const rpmIdx = rpmBytes.indexOf(0x0C);
+      telemetry.rpm = rpmIdx !== -1 && rpmBytes.length > rpmIdx + 2
+        ? Math.round(((rpmBytes[rpmIdx + 1] << 8) + rpmBytes[rpmIdx + 2]) / 4) : null;
+      const spdBytes = extractHexBytes(await sendObdCommand('01 0D', 1200), '41');
+      const spdIdx = spdBytes.indexOf(0x0D);
+      telemetry.speed = spdIdx !== -1 && spdBytes.length > spdIdx + 1 ? spdBytes[spdIdx + 1] : null;
+      if (telemetry.rpm !== null || telemetry.speed !== null || telemetry.batteryVolt !== null || telemetry.coolantTemp !== null) {
+        lastEcuAnswerMs = Date.now();
+      }
+      render();
+
       // 1c. Anomalie memorizzate (OBD-II standard Mode 03), ogni 4 cicli
       dtcCycle++;
       if (dtcCycle % 4 === 1) {
@@ -1263,7 +1315,7 @@
       }
 
       // 3. Query UDS VAG se profilo T-Roc / VAG attivo
-      if (profile === 'VW_TROC_20' || profile === 'AUTO') {
+      if (profile === 'VW_TROC_20') {
         await selectModule('engine');
 
         // Temperatura olio via UDS se Mode 01 5C non ha risposto
@@ -1385,7 +1437,7 @@
         showToast('Log vuoto', 'Nessuna riga da esportare.', 'warn');
         return;
       }
-      const header = `VAG Telemetry - log esportato il ${new Date().toLocaleString('it-IT')}\n` +
+      const header = `Car Telemetry - log esportato il ${new Date().toLocaleString('it-IT')}\n` +
                      `Veicolo: ${vehicleName.innerText}\n` +
                      `Profilo: ${vehicleProfileSelect.value}\n` +
                      '----------------------------------------\n';
@@ -1723,33 +1775,6 @@
         document.getElementById('audio-icon').className = audioMuted ? 'fa-solid fa-bell-slash text-slate-500' : 'fa-solid fa-bell text-orange-400';
       });
 
-      loadPersonalVoice();
-      const voiceInput = document.getElementById('voice-file-input');
-      document.getElementById('btn-voice-files').addEventListener('click', () => voiceInput.click());
-      voiceInput.addEventListener('change', async (e) => {
-        const files = Array.from(e.target.files || []);
-        const loaded = [];
-        for (const f of files) {
-          const key = f.name.replace(/\.[^.]+$/, '');
-          if (!VOICE_PHRASES[key]) continue;
-          const dataUrl = await new Promise((res, rej) => {
-            const r = new FileReader();
-            r.onload = () => res(r.result);
-            r.onerror = rej;
-            r.readAsDataURL(f);
-          });
-          personalVoice[key] = dataUrl;
-          loaded.push(key);
-        }
-        e.target.value = '';
-        if (loaded.length === 0) {
-          showToast('Nessuna voce caricata', 'Il nome del file deve essere uguale alla frase, es. coolant.m4a', 'warn');
-          return;
-        }
-        const ok = savePersonalVoice();
-        showToast(ok ? 'Voce personale' : 'Memoria piena', ok ? `Caricate: ${loaded.join(', ')}` : 'Usa file audio più corti', ok ? 'success' : 'warn');
-      });
-
       document.getElementById('btn-scan-cluster').addEventListener('click', () => scanClusterDids());
       document.getElementById('btn-scan-engine').addEventListener('click', () => scanEngineDids());
       document.getElementById('btn-scan-std').addEventListener('click', () => scanStandardPids());
@@ -1759,13 +1784,8 @@
         consoleLogBox.classList.toggle('hidden');
       });
 
-      vehicleProfileSelect.addEventListener('change', () => {
-        const val = vehicleProfileSelect.value;
-        if (val === 'VW_TROC_20') vehicleName.innerText = 'VW T-Roc 2.0 TDI (Profilo UDS VAG)';
-        else if (val === 'GENERIC_OBD') vehicleName.innerText = 'Profilo OBD2 Generico Standard';
-        else vehicleName.innerText = 'Auto-Rilevamento VIN Attivo';
-        if (isConnected && !isSimulationMode) pollTelemetryCycle();
-      });
+      vehicleProfileSelect.addEventListener('change', () => updateVehicleUI());
+      updateVehicleUI();
 
       render();
     });
