@@ -209,6 +209,8 @@
           <option value="VW_TROC_20">VW T-Roc 2.0 TDI (UDS Bosch)</option>
           <option value="GENERIC_OBD">OBD2 Generico Standard</option>
         </select>
+        <button id="btn-voice-files" class="bg-slate-800 hover:bg-slate-700 text-cyan-300 px-2 py-1 rounded-xl text-xs font-mono" title="Carica le tue frasi registrate (file audio con il nome della frase)">VOCE MIA</button>
+        <input type="file" id="voice-file-input" accept="audio/*" multiple class="hidden">
         <button id="btn-scan-cluster" class="bg-slate-800 hover:bg-slate-700 text-amber-400 px-2 py-1 rounded-xl text-xs font-mono" title="Cerca DID sulla centralina strumenti (0x17), sola lettura">SCAN 0x17</button>
         <button id="btn-scan-engine" class="bg-slate-800 hover:bg-slate-700 text-amber-400 px-2 py-1 rounded-xl text-xs font-mono" title="Cerca DID sulla centralina motore (7E0), sola lettura">SCAN MOTORE</button>
         <button id="btn-export-log" class="bg-slate-800 hover:bg-slate-700 text-emerald-400 px-2 py-1 rounded-xl text-xs font-mono" title="Scarica il log come file di testo">EXPORT</button>
@@ -340,6 +342,15 @@
         </div>
         <div id="sub-oil-press" class="text-xs font-bold text-slate-400 font-mono">NON CONFIGURATA</div>
       </div>
+
+      <!-- 9. Anomalie Centralina (OBD-II Mode 03) -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 flex flex-col items-center justify-between text-center relative overflow-hidden">
+        <div class="text-[11px] font-bold text-slate-400 font-orbitron uppercase tracking-wider">ANOMALIE</div>
+        <div class="my-3 flex flex-col items-center">
+          <div id="val-dtc-count" class="text-2xl font-black font-orbitron text-slate-100 mb-1">--</div>
+        </div>
+        <div id="sub-dtc-list" class="text-xs font-bold text-slate-400 font-mono break-all">IN ATTESA</div>
+      </div>
     </div>
 
     <!-- Terminal Log Console Box -->
@@ -409,6 +420,10 @@
     // Durante una scansione DID il polling è sospeso
     let scanning = false;
 
+    // Lettura anomalie: ogni 4 cicli di polling
+    let dtcCycle = 0;
+    let lastDtcKey = null;
+
     // Sceglie la centralina a cui inviare le richieste UDS.
     // Motore = 7E0 (risposta 7E8). Strumenti = 0x17, richiesta 714, risposta 77E.
     async function selectModule(target, fromScan = false) {
@@ -454,37 +469,104 @@
       } catch (e) {}
     }
 
-    // Notifica informativa: suono morbido + voce
-    function notifyInfo(text) {
+    // Frasi che puoi registrare con la tua voce. Il nome del file deve essere uguale alla chiave
+    // (es. coolant.m4a). Se un file manca, il dashboard usa la voce del telefono.
+    const VOICE_PHRASES = {
+      regen: 'Attenzione, rigenerazione DPF in corso. Non spegnere il motore.',
+      test: 'Test del sistema audio completato.',
+      scanDone: 'Scansione completata.',
+      dtc: 'Attenzione, la centralina segnala anomalie.',
+      dtcClear: 'Nessuna anomalia memorizzata.',
+      coolant: 'Attenzione, temperatura refrigerante alta.',
+      batteryLow: 'Attenzione, batteria scarica.',
+      batteryHigh: 'Attenzione, tensione batteria troppo alta.',
+      dpf: 'Attenzione, filtro antiparticolato intasato.',
+      oilPressure: 'Attenzione, pressione olio bassa.',
+    };
+    const VOICE_STORAGE_KEY = 'vagVoiceClipsV1';
+    let personalVoice = {}; // chiave -> audio registrato (data URL)
+
+    function loadPersonalVoice() {
+      try {
+        const raw = localStorage.getItem(VOICE_STORAGE_KEY);
+        personalVoice = raw ? JSON.parse(raw) : {};
+      } catch (e) {
+        personalVoice = {};
+      }
+      return Object.keys(personalVoice).length;
+    }
+
+    function savePersonalVoice() {
+      try {
+        localStorage.setItem(VOICE_STORAGE_KEY, JSON.stringify(personalVoice));
+        return true;
+      } catch (e) {
+        return false; // memoria piena
+      }
+    }
+
+    // Riproduce una frase: il tuo audio se esiste, altrimenti la voce del telefono
+    function playVoiceItem(item) {
+      return new Promise((resolve) => {
+        if (audioMuted || !speechEnabled || !item.text) return resolve();
+        const clip = item.key ? personalVoice[item.key] : null;
+        if (clip) {
+          try {
+            const audio = new Audio(clip);
+            const guard = setTimeout(resolve, 8000); // evita che la coda si blocchi se l'audio non finisce
+            audio.onended = () => { clearTimeout(guard); resolve(); };
+            audio.onerror = () => { clearTimeout(guard); resolve(); };
+            const p = audio.play();
+            if (p && p.catch) p.catch(resolve);
+          } catch (e) {
+            resolve();
+          }
+        } else {
+          speakText(item.text);
+          setTimeout(resolve, Math.min(6000, 600 + item.text.length * 70));
+        }
+      });
+    }
+
+    // Accoda le frasi in ordine. Ogni elemento: { key, text }. key null = sempre voce del telefono (numeri, dettagli)
+    let voiceQueue = Promise.resolve();
+    function say(items) {
+      voiceQueue = voiceQueue.then(() =>
+        items.reduce((p, it) => p.then(() => playVoiceItem(it)), Promise.resolve())
+      );
+    }
+
+    // Notifica informativa: suono morbido + frasi
+    function notifyInfo(items) {
       playChime();
-      speakText(text);
+      say(items);
     }
 
     // Controlla le soglie e avvisa solo quando un valore entra in allarme,
     // oppure dopo ALERT_REPEAT_MS se resta fuori dai limiti. Non ripete a ogni aggiornamento.
     function checkLimits() {
       const nowMs = Date.now();
-      const messages = [];
       const dpfPct = telemetry.dpfSootGrams !== null ? (telemetry.dpfSootGrams / DPF_LIMIT_GRAMS) * 100 : null;
 
       const checks = [
         { key: 'coolant', active: telemetry.coolantTemp !== null && telemetry.coolantTemp > LIMITS.coolantHigh,
-          text: `Attenzione, temperatura refrigerante alta: ${Math.round(telemetry.coolantTemp)} gradi.` },
+          phrase: VOICE_PHRASES.coolant, detail: () => `${Math.round(telemetry.coolantTemp)} gradi.` },
         { key: 'batteryLow', active: telemetry.batteryVolt !== null && telemetry.batteryVolt < LIMITS.batteryLow,
-          text: `Attenzione, batteria scarica: ${telemetry.batteryVolt && telemetry.batteryVolt.toFixed(1)} volt.` },
+          phrase: VOICE_PHRASES.batteryLow, detail: () => `${telemetry.batteryVolt.toFixed(2)} volt.` },
         { key: 'batteryHigh', active: telemetry.batteryVolt !== null && telemetry.batteryVolt > LIMITS.batteryHigh,
-          text: `Attenzione, tensione batteria troppo alta: ${telemetry.batteryVolt && telemetry.batteryVolt.toFixed(1)} volt.` },
+          phrase: VOICE_PHRASES.batteryHigh, detail: () => `${telemetry.batteryVolt.toFixed(2)} volt.` },
         { key: 'dpf', active: dpfPct !== null && dpfPct > LIMITS.dpfHighPct,
-          text: `Attenzione, filtro antiparticolato intasato al ${Math.round(dpfPct)} per cento.` },
-        { key: 'oilPressure', active: OIL_PRESSURE.did && telemetry.oilPressureBar !== null && telemetry.oilPressureBar < OIL_PRESSURE.minOk,
-          text: `Attenzione, pressione olio bassa: ${telemetry.oilPressureBar && telemetry.oilPressureBar.toFixed(1)} bar.` },
+          phrase: VOICE_PHRASES.dpf, detail: () => `Al ${Math.round(dpfPct)} per cento.` },
+        { key: 'oilPressure', active: !!OIL_PRESSURE.did && telemetry.oilPressureBar !== null && telemetry.oilPressureBar < OIL_PRESSURE.minOk,
+          phrase: VOICE_PHRASES.oilPressure, detail: () => `${telemetry.oilPressureBar.toFixed(1)} bar.` },
       ];
 
+      const items = [];
       for (const c of checks) {
         if (c.active) {
           const last = alertLastFired[c.key] || 0;
           if (last === 0 || nowMs - last > ALERT_REPEAT_MS) {
-            messages.push(c.text);
+            items.push({ key: c.key, text: c.phrase }, { key: null, text: c.detail() });
             alertLastFired[c.key] = nowMs;
           }
         } else {
@@ -492,9 +574,9 @@
         }
       }
 
-      if (messages.length > 0) {
+      if (items.length > 0) {
         playAlarm();
-        speakText(messages.join('. '));
+        say(items);
       }
     }
 
@@ -564,6 +646,7 @@
       batteryVolt: null,
       oilPressureBar: null,
       clusterRaw202F: null,
+      dtcCodes: null,
       vin: ''
     };
 
@@ -659,7 +742,7 @@
         
         const nowMs = Date.now();
         if (nowMs - lastSpeechTime > 12000) {
-          speakText("Attenzione, rigenerazione D P F in corso. Non spegnere il motore.");
+          say([{ key: 'regen', text: VOICE_PHRASES.regen }]);
           lastSpeechTime = nowMs;
         }
       } else {
@@ -724,6 +807,27 @@
       } else {
         document.getElementById('val-oil-press').innerText = '-- bar';
         document.getElementById('sub-oil-press').innerText = OIL_PRESSURE.did ? noDataText() : 'NON CONFIGURATA';
+      }
+
+      // 9. Anomalie centralina
+      const dtcVal = document.getElementById('val-dtc-count');
+      const dtcSub = document.getElementById('sub-dtc-list');
+      if (telemetry.dtcCodes === null) {
+        dtcVal.innerText = '--';
+        dtcVal.className = 'text-2xl font-black font-orbitron text-slate-100 mb-1';
+        dtcSub.innerText = noDataText();
+        dtcSub.title = '';
+      } else if (telemetry.dtcCodes.length === 0) {
+        dtcVal.innerText = '0';
+        dtcVal.className = 'text-2xl font-black font-orbitron text-emerald-400 mb-1';
+        dtcSub.innerText = 'NESSUNA ANOMALIA';
+        dtcSub.title = '';
+      } else {
+        const list = telemetry.dtcCodes;
+        dtcVal.innerText = String(list.length);
+        dtcVal.className = 'text-2xl font-black font-orbitron text-red-400 mb-1';
+        dtcSub.innerText = list.slice(0, 3).join(' ') + (list.length > 3 ? ` +${list.length - 3}` : '');
+        dtcSub.title = list.join(', ');
       }
 
       checkLimits();
@@ -965,6 +1069,45 @@
     }
 
     // Ciclo periodico di lettura parametri
+    // Decodifica le anomalie memorizzate (OBD-II standard Mode 03).
+    // Ritorna un array di codici (es. "P0133"), [] se non ci sono anomalie, null se la risposta non è valida.
+    function parseDtcs(raw) {
+      if (!raw) return null;
+      if (/NO DATA/i.test(raw)) return [];
+      if (/ERROR|STOPPED|UNABLE|\?/i.test(raw)) return null;
+      const bytes = extractHexBytes(raw, null);
+      let sawResponse = false;
+      const codes = [];
+      for (let i = 0; i < bytes.length; i++) {
+        if (bytes[i] !== 0x43) continue;
+        sawResponse = true;
+        for (let j = i + 1; j + 1 < bytes.length; j += 2) {
+          const b1 = bytes[j];
+          const b2 = bytes[j + 1];
+          if (b1 === 0 && b2 === 0) break;
+          const letter = ['P', 'C', 'B', 'U'][(b1 >> 6) & 3];
+          const code = letter + ((b1 >> 4) & 3) + (b1 & 0x0F).toString(16).toUpperCase() + b2.toString(16).toUpperCase().padStart(2, '0');
+          if (!codes.includes(code)) codes.push(code);
+        }
+      }
+      return sawResponse ? codes : null;
+    }
+
+    // Aggiorna lo stato anomalie e avvisa solo quando l'elenco cambia
+    function handleDtcUpdate(codes) {
+      telemetry.dtcCodes = codes;
+      const key = codes.join(',');
+      if (key === lastDtcKey) return;
+      const prev = lastDtcKey;
+      lastDtcKey = key;
+      if (codes.length > 0) {
+        playAlarm();
+        say([{ key: 'dtc', text: VOICE_PHRASES.dtc }, { key: null, text: `${codes.length} codici: ${codes.join(', ')}.` }]);
+      } else if (prev !== null) {
+        notifyInfo([{ key: 'dtcClear', text: VOICE_PHRASES.dtcClear }]);
+      }
+    }
+
     async function pollTelemetryCycle() {
       if (!isConnected || isSimulationMode || isProcessingCommand || scanning) return;
 
@@ -986,6 +1129,16 @@
       const battIdx = battBytes.indexOf(0x42);
       if (battIdx !== -1 && battBytes.length > battIdx + 2) {
         telemetry.batteryVolt = Number((((battBytes[battIdx + 1] << 8) + battBytes[battIdx + 2]) / 1000).toFixed(2));
+        render();
+      }
+
+      // 1c. Anomalie memorizzate (OBD-II standard Mode 03), ogni 4 cicli
+      dtcCycle++;
+      if (dtcCycle % 4 === 1) {
+        await sendObdCommand('AT SH 7DF', 900);
+        const dtcRaw = await sendObdCommand('03', 2000);
+        const codes = parseDtcs(dtcRaw);
+        if (codes !== null) handleDtcUpdate(codes);
         render();
       }
 
@@ -1173,7 +1326,7 @@
       }
 
       log(`SCAN completata: ${found} DID con risposta`, 'warn');
-      notifyInfo(`Scansione centralina strumenti completata. ${found} codici con risposta.`);
+      notifyInfo([{ key: 'scanDone', text: VOICE_PHRASES.scanDone }, { key: null, text: `${found} codici con risposta.` }]);
       showToast('Scansione completata', `${found} DID con risposta (vedi LOG)`, 'success');
       if (isConnected) startPolling();
     }
@@ -1217,7 +1370,7 @@
       }
 
       log(`SCAN motore completata: ${found} DID con risposta`, 'warn');
-      notifyInfo(`Scansione motore completata. ${found} codici con risposta.`);
+      notifyInfo([{ key: 'scanDone', text: VOICE_PHRASES.scanDone }, { key: null, text: `${found} codici con risposta.` }]);
       showToast('Scansione motore completata', `${found} DID con risposta (vedi LOG)`, 'success');
       if (isConnected) startPolling();
     }
@@ -1363,7 +1516,7 @@
 
       btnTestVoice.addEventListener('click', () => {
         playAlarm();
-        speakText("Test del sistema audio completato. Attenzione, rigenerazione D P F in corso. Non spegnere il motore.");
+        say([{ key: 'test', text: VOICE_PHRASES.test }]);
         showToast("Test Audio Vocale", "Sintesi vocale e cicalino attivati", "info");
       });
 
@@ -1377,6 +1530,33 @@
       btnMuteAlarm.addEventListener('click', () => {
         audioMuted = !audioMuted;
         document.getElementById('audio-icon').className = audioMuted ? 'fa-solid fa-bell-slash text-slate-500' : 'fa-solid fa-bell text-orange-400';
+      });
+
+      loadPersonalVoice();
+      const voiceInput = document.getElementById('voice-file-input');
+      document.getElementById('btn-voice-files').addEventListener('click', () => voiceInput.click());
+      voiceInput.addEventListener('change', async (e) => {
+        const files = Array.from(e.target.files || []);
+        const loaded = [];
+        for (const f of files) {
+          const key = f.name.replace(/\.[^.]+$/, '');
+          if (!VOICE_PHRASES[key]) continue;
+          const dataUrl = await new Promise((res, rej) => {
+            const r = new FileReader();
+            r.onload = () => res(r.result);
+            r.onerror = rej;
+            r.readAsDataURL(f);
+          });
+          personalVoice[key] = dataUrl;
+          loaded.push(key);
+        }
+        e.target.value = '';
+        if (loaded.length === 0) {
+          showToast('Nessuna voce caricata', 'Il nome del file deve essere uguale alla frase, es. coolant.m4a', 'warn');
+          return;
+        }
+        const ok = savePersonalVoice();
+        showToast(ok ? 'Voce personale' : 'Memoria piena', ok ? `Caricate: ${loaded.join(', ')}` : 'Usa file audio più corti', ok ? 'success' : 'warn');
       });
 
       document.getElementById('btn-scan-cluster').addEventListener('click', () => scanClusterDids());
