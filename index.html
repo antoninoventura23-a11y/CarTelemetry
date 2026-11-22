@@ -128,6 +128,44 @@
       main .grid > div, main .grid > div:hover { transition: none; transform: none; }
     }
   </style>
+  <style id="mobile-polish">
+    /* Ottimizzazione per smartphone: solo CSS, nessuna modifica a logica o ID */
+    @media (max-width: 640px) {
+      html, body { overflow-x: hidden; }
+
+      /* Barra veicolo: nome sopra, selettore a tutta larghezza, pulsanti su griglia da 3 */
+      main > div.flex-wrap {
+        padding: 8px;
+        gap: 6px;
+        flex-direction: column;
+        align-items: stretch;
+      }
+      main > div.flex-wrap > div:first-child { width: 100%; }
+      main > div.flex-wrap > div:first-child span { font-size: 11px; }
+      main > div.flex-wrap > div:nth-child(2) {
+        width: 100%;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 6px;
+      }
+      #vehicle-profile-select { grid-column: 1 / -1; width: 100%; font-size: 12px; }
+      main > div.flex-wrap > div:nth-child(2) > button {
+        font-size: 10px;
+        padding: 7px 4px;
+        white-space: nowrap;
+        text-align: center;
+        min-width: 0;
+      }
+
+      /* Schede più compatte */
+      main { padding: 8px; }
+      main .grid { gap: 8px; }
+      main .grid > div { padding: 8px 6px; }
+      main .grid > div > .text-\[11px\] { font-size: 9px; letter-spacing: 0.08em; line-height: 1.2; }
+      main .grid .relative.w-28.h-28 { width: 92px; height: 92px; margin-top: 4px; margin-bottom: 4px; }
+      main .grid > div .font-orbitron.text-2xl { font-size: 1.25rem; }
+    }
+  </style>
   <!-- App installabile: icona e nome dedicati quando il dashboard viene aggiunto alla schermata Home -->
   <meta name="theme-color" content="#020617">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -280,6 +318,7 @@
           <option value="VW_TROC_20">VW T-Roc 2.0 TDI (UDS Bosch)</option>
           <option value="GENERIC_OBD">OBD2 Generico Standard</option>
         </select>
+        <button id="btn-voice-files" class="bg-slate-800 hover:bg-slate-700 text-cyan-300 px-2 py-1 rounded-xl text-xs font-mono" title="Carica le tue frasi registrate (file audio con il nome della frase)">VOCE MIA</button>
         <input type="file" id="voice-file-input" accept="audio/*" multiple class="hidden">
         <button id="btn-scan-cluster" class="bg-slate-800 hover:bg-slate-700 text-amber-400 px-2 py-1 rounded-xl text-xs font-mono" title="Cerca DID sulla centralina strumenti (0x17), sola lettura">SCAN 0x17</button>
         <button id="btn-scan-engine" class="bg-slate-800 hover:bg-slate-700 text-amber-400 px-2 py-1 rounded-xl text-xs font-mono" title="Cerca DID sulla centralina motore (7E0), sola lettura">SCAN MOTORE</button>
