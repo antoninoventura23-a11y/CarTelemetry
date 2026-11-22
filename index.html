@@ -128,6 +128,77 @@
       main .grid > div, main .grid > div:hover { transition: none; transform: none; }
     }
   </style>
+  <!-- App installabile: icona e nome dedicati quando il dashboard viene aggiunto alla schermata Home -->
+  <meta name="theme-color" content="#020617">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="VAG Telemetry">
+  <meta name="mobile-web-app-capable" content="yes">
+  <script>
+    // Crea in memoria l'icona e il manifest, così non servono file aggiuntivi.
+    (function setupAppInstall() {
+      function makeIcon(size) {
+        const c = document.createElement('canvas');
+        c.width = size;
+        c.height = size;
+        const g = c.getContext && c.getContext('2d');
+        if (!g) return null;
+        const bg = g.createLinearGradient(0, 0, size, size);
+        bg.addColorStop(0, '#0f172a');
+        bg.addColorStop(1, '#020617');
+        g.fillStyle = bg;
+        g.fillRect(0, 0, size, size);
+        // Arco stile tachimetro
+        g.lineCap = 'round';
+        g.lineWidth = size * 0.11;
+        g.strokeStyle = '#22d3ee';
+        g.beginPath();
+        g.arc(size / 2, size / 2, size * 0.36, Math.PI * 0.75, Math.PI * 2.25);
+        g.stroke();
+        // Sigla
+        g.fillStyle = '#f8fafc';
+        g.font = `900 ${Math.round(size * 0.26)}px Arial, sans-serif`;
+        g.textAlign = 'center';
+        g.textBaseline = 'middle';
+        g.fillText('VAG', size / 2, size / 2 + size * 0.02);
+        return c.toDataURL('image/png');
+      }
+
+      const icon512 = makeIcon(512);
+      if (!icon512) return; // il browser non supporta il canvas: niente installazione
+      const icon192 = makeIcon(192);
+      const icon180 = makeIcon(180);
+
+      // Percorso della pagina: il manifest deve puntare alla stessa cartella per essere installabile
+      const pagePath = location.origin + location.pathname;
+      const scopePath = pagePath.replace(/[^/]*$/, '');
+
+      const manifest = {
+        name: 'VAG Telemetry PRO',
+        short_name: 'VAG Telemetry',
+        start_url: pagePath,
+        scope: scopePath,
+        display: 'standalone',
+        orientation: 'portrait',
+        background_color: '#020617',
+        theme_color: '#020617',
+        icons: [
+          { src: icon192, sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: icon512, sizes: '512x512', type: 'image/png', purpose: 'any' }
+        ]
+      };
+
+      const manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' });
+      const manifestLink = document.createElement('link');
+      manifestLink.rel = 'manifest';
+      manifestLink.href = URL.createObjectURL(manifestBlob);
+      document.head.appendChild(manifestLink);
+
+      const appleIcon = document.createElement('link');
+      appleIcon.rel = 'apple-touch-icon';
+      appleIcon.href = icon180;
+      document.head.appendChild(appleIcon);
+    })();
+  </script>
 </head>
 <body class="h-full bg-slate-950 text-slate-100 bg-grid overflow-x-hidden flex flex-col justify-between">
 
