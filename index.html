@@ -545,6 +545,10 @@
     let vehicleInfo = null;
     let connectedAtMs = 0;
     let lastEcuAnswerMs = 0;
+    // Metodo di interrogazione standard (può cambiare con la procedura di prova automatica)
+    let stdHeader = '7DF';
+    let stdRx = null;
+    let probeDone = false;
 
     // Lettura anomalie: ogni 4 cicli di polling
     let dtcCycle = 0;
@@ -931,9 +935,13 @@
         statusEl.innerText = '';
       } else {
         const silentFor = Date.now() - (lastEcuAnswerMs || connectedAtMs);
-        statusEl.innerText = silentFor > 30000
-          ? 'Nessuna risposta dall\'auto: accendi il quadro e attendi'
-          : (lastEcuAnswerMs === 0 ? 'Ricerca della centralina in corso...' : '');
+        if (silentFor > 30000 && vehicleInfo) {
+          statusEl.innerText = 'VIN letto, ma la centralina motore non risponde: avvia il motore (al minimo, fermo) e attendi';
+        } else if (silentFor > 30000) {
+          statusEl.innerText = 'Nessuna risposta dall\'auto: accendi il quadro e attendi';
+        } else {
+          statusEl.innerText = lastEcuAnswerMs === 0 ? 'Ricerca della centralina in corso...' : '';
+        }
       }
 
       checkLimits();
@@ -1201,6 +1209,9 @@
       vehicleInfo = null;
       connectedAtMs = Date.now();
       lastEcuAnswerMs = 0;
+      probeDone = false;
+      stdHeader = '7DF';
+      stdRx = null;
       const vinRaw = await sendObdCommand('09 02', 20000);
       const detectedVin = parseVinResponse(vinRaw);
       if (detectedVin) {
@@ -1258,13 +1269,61 @@
       }
     }
 
+    // Imposta l'indirizzo usato per le letture standard (di default: richiesta funzionale a tutte le centraline)
+    async function selectStdHeader() {
+      await sendObdCommand(`AT SH ${stdHeader}`, 900);
+      if (stdRx) await sendObdCommand(`AT CRA ${stdRx}`, 900);
+    }
+
+    // Quando la centralina motore non risponde, prova metodi alternativi e registra nel LOG cosa risponde.
+    // Esegue solo richieste di lettura (Mode 01 PID 00: quali parametri supporta).
+    async function probeEcu() {
+      probeDone = true;
+      log('PROBE: la centralina motore non risponde, provo metodi alternativi', 'warn');
+      const tries = [
+        { name: 'CAN 500k, richiesta funzionale', sp: '6', sh: '7DF', rx: null },
+        { name: 'CAN 500k, indirizzo motore diretto 7E0', sp: '6', sh: '7E0', rx: '7E8' },
+      ];
+      for (const t of tries) {
+        await sendObdCommand(`AT SP ${t.sp}`, 1500);
+        await sendObdCommand(`AT SH ${t.sh}`, 900);
+        if (t.rx) await sendObdCommand(`AT CRA ${t.rx}`, 900);
+        else await sendObdCommand('AT AR', 900);
+        const raw = await sendObdCommand('01 00', 3000);
+        const bytes = extractHexBytes(raw, '41');
+        const ok = bytes.length >= 6 && bytes[1] === 0x00;
+        log(`PROBE ${t.name}: ${ok ? 'RISPONDE' : 'nessuna risposta'} (rx: "${raw || 'vuoto'}")`, ok ? 'info' : 'warn');
+        if (ok) {
+          stdHeader = t.sh;
+          stdRx = t.rx;
+          lastEcuAnswerMs = Date.now();
+          log(`PROBE riuscito: uso ${t.name}`, 'info');
+          notifyInfo([{ key: null, text: 'Centralina motore trovata con un metodo alternativo.' }]);
+          return true;
+        }
+      }
+      // Nessun metodo ha funzionato: ripristino la configurazione standard
+      await sendObdCommand('AT SP 0', 1500);
+      await sendObdCommand('AT SH 7DF', 900);
+      await sendObdCommand('AT AR', 900);
+      stdHeader = '7DF';
+      stdRx = null;
+      log('PROBE: nessun metodo ha ricevuto risposta dalla centralina motore', 'error');
+      return false;
+    }
+
     async function pollTelemetryCycle() {
       if (!isConnected || isSimulationMode || isProcessingCommand || scanning) return;
 
       const profile = vehicleProfileSelect.value;
 
+      // Se la centralina motore è muta da 25 s dalla connessione, provo i metodi alternativi (una volta)
+      if (!probeDone && lastEcuAnswerMs === 0 && Date.now() - connectedAtMs > 25000) {
+        await probeEcu();
+      }
+
       // 1. Liquido refrigerante (OBD-II Standard Mode 01 PID 05)
-      await sendObdCommand('AT SH 7DF', 900);
+      await selectStdHeader();
       const coolRaw = await sendObdCommand('01 05', 1500);
       const coolBytes = extractHexBytes(coolRaw, '41');
       const coolIdx = coolBytes.indexOf(0x05);
@@ -1298,7 +1357,7 @@
       // 1c. Anomalie memorizzate (OBD-II standard Mode 03), ogni 4 cicli
       dtcCycle++;
       if (dtcCycle % 4 === 1) {
-        await sendObdCommand('AT SH 7DF', 900);
+        await selectStdHeader();
         const dtcRaw = await sendObdCommand('03', 2000);
         const codes = parseDtcs(dtcRaw);
         if (codes !== null) handleDtcUpdate(codes);
