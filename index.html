@@ -318,9 +318,11 @@
           <option value="VW_TROC_20">VW T-Roc 2.0 TDI (UDS Bosch)</option>
           <option value="GENERIC_OBD">OBD2 Generico Standard</option>
         </select>
+        <button id="btn-voice-files" class="bg-slate-800 hover:bg-slate-700 text-cyan-300 px-2 py-1 rounded-xl text-xs font-mono" title="Carica le tue frasi registrate (file audio con il nome della frase)">VOCE MIA</button>
         <input type="file" id="voice-file-input" accept="audio/*" multiple class="hidden">
         <button id="btn-scan-cluster" class="bg-slate-800 hover:bg-slate-700 text-amber-400 px-2 py-1 rounded-xl text-xs font-mono" title="Cerca DID sulla centralina strumenti (0x17), sola lettura">SCAN 0x17</button>
         <button id="btn-scan-engine" class="bg-slate-800 hover:bg-slate-700 text-amber-400 px-2 py-1 rounded-xl text-xs font-mono" title="Cerca DID sulla centralina motore (7E0), sola lettura">SCAN MOTORE</button>
+        <button id="btn-scan-std" class="bg-slate-800 hover:bg-slate-700 text-amber-400 px-2 py-1 rounded-xl text-xs font-mono" title="Legge tutti i parametri standard OBD-II supportati dall'auto (funziona su qualsiasi auto)">PID STANDARD</button>
         <button id="btn-export-log" class="bg-slate-800 hover:bg-slate-700 text-emerald-400 px-2 py-1 rounded-xl text-xs font-mono" title="Scarica il log come file di testo">EXPORT</button>
         <button id="btn-toggle-log" class="bg-slate-800 hover:bg-slate-700 text-slate-400 px-2 py-1 rounded-xl text-xs font-mono">
           LOG
@@ -1169,9 +1171,10 @@
           }
         }
       } else {
+        // VIN non letto: non assumiamo più una VW. Profilo generico, le letture VAG restano disattivate.
         if (vehicleProfileSelect.value === 'AUTO') {
-          vehicleProfileSelect.value = 'VW_TROC_20';
-          vehicleName.innerText = 'VW T-Roc / OBD2 Connesso (VIN non letto)';
+          vehicleProfileSelect.value = 'GENERIC_OBD';
+          vehicleName.innerText = 'OBD2 Connesso (VIN non letto): profilo generico';
         }
       }
     }
@@ -1483,6 +1486,86 @@
       if (isConnected) startPolling();
     }
 
+    // Parametri standard OBD-II (Mode 01) con decodifica nota. Gli altri vengono mostrati in grezzo.
+    const STD_PIDS = {
+      0x04: { name: 'Carico motore', unit: '%', f: d => d[0] * 100 / 255 },
+      0x05: { name: 'Temperatura refrigerante', unit: '°C', f: d => d[0] - 40 },
+      0x0B: { name: 'Pressione collettore', unit: 'kPa', f: d => d[0] },
+      0x0C: { name: 'Giri motore', unit: 'rpm', f: d => ((d[0] << 8) + d[1]) / 4 },
+      0x0D: { name: 'Velocità', unit: 'km/h', f: d => d[0] },
+      0x0F: { name: 'Temperatura aria aspirata', unit: '°C', f: d => d[0] - 40 },
+      0x10: { name: 'Portata aria (MAF)', unit: 'g/s', f: d => ((d[0] << 8) + d[1]) / 100 },
+      0x11: { name: 'Posizione farfalla', unit: '%', f: d => d[0] * 100 / 255 },
+      0x2F: { name: 'Livello carburante', unit: '%', f: d => d[0] * 100 / 255 },
+      0x42: { name: 'Tensione batteria', unit: 'V', f: d => ((d[0] << 8) + d[1]) / 1000 },
+      0x46: { name: 'Temperatura ambiente', unit: '°C', f: d => d[0] - 40 },
+      0x5C: { name: 'Temperatura olio', unit: '°C', f: d => d[0] - 40 },
+      0x5E: { name: 'Portata carburante', unit: 'L/h', f: d => ((d[0] << 8) + d[1]) / 20 },
+      0x7C: { name: 'Temperatura DPF', unit: '°C', f: d => ((d[0] << 8) + d[1]) / 10 - 40 },
+    };
+
+    // Legge tutti i parametri standard che l'auto dichiara di supportare (sola lettura, Mode 01)
+    async function scanStandardPids() {
+      if (!isConnected || isSimulationMode) {
+        showToast('Scansione non disponibile', 'Collegati al veicolo (non in SIM).', 'warn');
+        return;
+      }
+      stopPolling();
+      scanning = true;
+      await new Promise(r => setTimeout(r, 2500));
+
+      log('SCAN parametri standard OBD-II (Mode 01, sola lettura)', 'warn');
+      const supported = new Set();
+      let found = 0;
+      try {
+        await selectModule('engine', true);
+        await sendObdCommand('AT SH 7DF', 900, true);
+
+        // 1) Quali PID sono supportati: bitmask 0x00, 0x20, 0x40 ... 0xC0
+        for (const base of [0x00, 0x20, 0x40, 0x60, 0x80, 0xA0, 0xC0]) {
+          const hex = base.toString(16).toUpperCase().padStart(2, '0');
+          const raw = await sendObdCommand(`01 ${hex}`, 1200, true);
+          const bytes = extractHexBytes(raw, '41');
+          if (bytes.length < 6 || bytes[1] !== base) continue;
+          for (let k = 0; k < 32; k++) {
+            const bit = (bytes[2 + Math.floor(k / 8)] >> (7 - (k % 8))) & 1;
+            if (bit) supported.add(base + k + 1);
+          }
+        }
+        const list = [...supported].filter(p => p % 0x20 !== 0).sort((a, b) => a - b);
+        log(`PID supportati: ${list.map(p => p.toString(16).toUpperCase().padStart(2, '0')).join(' ') || 'nessuno'}`, 'info');
+
+        // 2) Lettura di ogni parametro supportato
+        for (const pid of list) {
+          const hex = pid.toString(16).toUpperCase().padStart(2, '0');
+          const raw = await sendObdCommand(`01 ${hex}`, 1200, true);
+          const bytes = extractHexBytes(raw, '41');
+          if (bytes.length < 3 || bytes[1] !== pid) {
+            log(`PID ${hex}: nessuna risposta valida`, 'warn');
+            continue;
+          }
+          const data = bytes.slice(2);
+          const raw_hex = data.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
+          const def = STD_PIDS[pid];
+          if (def) {
+            const value = Number(def.f(data).toFixed(2));
+            log(`PID ${hex} ${def.name}: ${value} ${def.unit} (grezzo ${raw_hex})`, 'rx');
+          } else {
+            log(`PID ${hex} (non decodificato) -> ${raw_hex}`, 'rx');
+          }
+          found++;
+        }
+      } finally {
+        await selectModule('engine', true);
+        scanning = false;
+      }
+
+      log(`SCAN standard completata: ${found} parametri letti`, 'warn');
+      notifyInfo([{ key: 'scanDone', text: VOICE_PHRASES.scanDone }, { key: null, text: `${found} parametri standard letti.` }]);
+      showToast('Parametri standard', `${found} parametri letti (vedi LOG)`, 'success');
+      if (isConnected) startPolling();
+    }
+
     function startPolling() {
       stopPolling();
       pollTelemetryCycle();
@@ -1669,6 +1752,7 @@
 
       document.getElementById('btn-scan-cluster').addEventListener('click', () => scanClusterDids());
       document.getElementById('btn-scan-engine').addEventListener('click', () => scanEngineDids());
+      document.getElementById('btn-scan-std').addEventListener('click', () => scanStandardPids());
       document.getElementById('btn-export-log').addEventListener('click', exportLog);
 
       document.getElementById('btn-toggle-log').addEventListener('click', () => {
