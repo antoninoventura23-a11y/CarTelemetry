@@ -519,6 +519,9 @@
     // È una STIMA: regola questo valore in base al tuo filtro/centralina.
     const DPF_LIMIT_GRAMS = 30;
 
+    // Versione del file: compare in cima al LOG per verificare quale versione stai usando
+    const BUILD_ID = '2026-11-22 probe-uds';
+
     // Pressione olio: il DID NON è ancora noto. Dopo SCAN 0x17 inserisci qui il codice trovato.
     // Valore in bar = byte * scale + offset. did: null = non configurata.
     const OIL_PRESSURE = { did: null, bytes: 1, scale: 1, offset: 0, minOk: 1.0 };
@@ -1197,6 +1200,7 @@
 
     // Inizializzazione ELM327 + rilevamento VIN
     async function initializeObdAndVin() {
+      log(`Versione dashboard: ${BUILD_ID}`, 'info');
       log('Inizializzazione Vgate ELM327...', 'info');
       await sendObdCommand('AT Z', 2500);
       await sendObdCommand('AT E0', 1200);
@@ -1302,6 +1306,18 @@
           return true;
         }
       }
+      // Test UDS diretto sulla centralina motore (sessione estesa + VIN dalla centralina, DID F190)
+      await sendObdCommand('AT SP 6', 1500);
+      await sendObdCommand('AT SH 7E0', 900);
+      await sendObdCommand('AT CRA 7E8', 900);
+      const sessRaw = await sendObdCommand('10 03', 2500);
+      const sessBytes = extractHexBytes(sessRaw, '50');
+      log(`PROBE UDS sessione 10 03 su 7E0: ${sessBytes.length ? 'accettata' : 'nessuna risposta'} (rx: "${sessRaw || 'vuoto'}")`, sessBytes.length ? 'info' : 'warn');
+      const udsRaw = await sendObdCommand('22 F1 90', 3000);
+      const udsBytes = extractHexBytes(udsRaw, '62');
+      const udsOk = udsBytes.length >= 3 && udsBytes[1] === 0xF1 && udsBytes[2] === 0x90;
+      log(`PROBE UDS VIN da centralina motore (22 F1 90): ${udsOk ? 'RISPONDE' : 'nessuna risposta'} (rx: "${udsRaw || 'vuoto'}")`, udsOk ? 'info' : 'warn');
+
       // Nessun metodo ha funzionato: ripristino la configurazione standard
       await sendObdCommand('AT SP 0', 1500);
       await sendObdCommand('AT SH 7DF', 900);
