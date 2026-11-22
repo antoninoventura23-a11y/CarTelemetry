@@ -46,6 +46,88 @@
       transition: stroke-dashoffset 0.4s cubic-bezier(0.4, 0, 0.2, 1), stroke 0.3s ease;
     }
   </style>
+  <style id="visual-polish">
+    /* Stile grafico più marcato. Solo CSS: nessuna modifica a logica, ID o icone. */
+    body {
+      background:
+        radial-gradient(900px 480px at 15% -10%, rgba(6, 182, 212, 0.18), transparent 60%),
+        radial-gradient(800px 420px at 95% 0%, rgba(249, 115, 22, 0.10), transparent 60%),
+        #020617 !important;
+    }
+
+    /* Intestazione: vetro scuro con linea luminosa */
+    header {
+      background: linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(2, 6, 23, 0.94)) !important;
+      border-bottom: 1px solid rgba(6, 182, 212, 0.45) !important;
+      box-shadow: 0 0 24px rgba(6, 182, 212, 0.18), 0 12px 30px -12px rgba(0, 0, 0, 0.8);
+    }
+    header h1 {
+      background: linear-gradient(90deg, #22d3ee, #67e8f9 40%, #fb923c);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent !important;
+    }
+
+    /* Schede: vetro, bordo luminoso, barra di accento in alto */
+    main .grid > div {
+      background: linear-gradient(160deg, rgba(30, 41, 59, 0.75), rgba(2, 6, 23, 0.94)) !important;
+      transition: transform 0.2s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+    }
+    main .grid > div:not([class*="glow-"]) {
+      border-color: rgba(56, 189, 248, 0.22) !important;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 14px 36px -18px rgba(6, 182, 212, 0.35);
+    }
+    main .grid > div::before {
+      content: "";
+      position: absolute;
+      left: 12%;
+      right: 12%;
+      top: 0;
+      height: 2px;
+      border-radius: 2px;
+      background: linear-gradient(90deg, transparent, #22d3ee, transparent);
+      opacity: 0.85;
+      pointer-events: none;
+    }
+    main .grid > div:hover {
+      transform: translateY(-3px);
+      border-color: rgba(34, 211, 238, 0.6) !important;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 18px 40px -16px rgba(34, 211, 238, 0.5);
+    }
+
+    /* Numeri grandi: più presenti */
+    .font-orbitron {
+      letter-spacing: 0.05em;
+      text-shadow: 0 0 22px rgba(34, 211, 238, 0.25);
+      font-variant-numeric: tabular-nums;
+    }
+    main .grid > div .font-orbitron.text-2xl {
+      font-size: 1.65rem;
+      line-height: 1.1;
+    }
+
+    /* Etichette delle schede */
+    main .grid > div > .text-\[11px\] {
+      letter-spacing: 0.14em;
+      color: #94a3b8;
+    }
+
+    /* Striscia di stato sotto le schede: più netta */
+    main .grid + div,
+    main > div.bg-slate-900\/80 {
+      border-color: rgba(56, 189, 248, 0.25) !important;
+      background: linear-gradient(90deg, rgba(15, 23, 42, 0.9), rgba(2, 6, 23, 0.9)) !important;
+    }
+
+    @media (max-width: 640px) {
+      main { padding-left: 10px; padding-right: 10px; }
+      main .grid { gap: 10px; }
+      main .grid > div .font-orbitron.text-2xl { font-size: 1.4rem; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      main .grid > div, main .grid > div:hover { transition: none; transform: none; }
+    }
+  </style>
 </head>
 <body class="h-full bg-slate-950 text-slate-100 bg-grid overflow-x-hidden flex flex-col justify-between">
 
@@ -309,6 +391,16 @@
     // Valore in bar = byte * scale + offset. did: null = non configurata.
     const OIL_PRESSURE = { did: null, bytes: 1, scale: 1, offset: 0, minOk: 1.0 };
 
+    // Soglie per gli avvisi vocali/acustici. Modificale in base alla tua auto.
+    const LIMITS = {
+      coolantHigh: 105,    // °C, refrigerante troppo caldo
+      batteryLow: 12.0,    // V, batteria scarica
+      batteryHigh: 15.0,   // V, tensione di carica troppo alta
+      dpfHighPct: 80,      // %, DPF molto intasato
+    };
+    const ALERT_REPEAT_MS = 5 * 60 * 1000; // ripeti lo stesso avviso al massimo ogni 5 minuti
+    const alertLastFired = {}; // stato: chiave -> timestamp dell'ultimo avviso (0 = rientrato nei limiti)
+
     // Testo mostrato quando un valore non arriva: distingue "non collegato" da "collegato ma nessun dato"
     function noDataText() {
       return isConnected ? 'NESSUN DATO' : 'IN ATTESA';
@@ -339,6 +431,71 @@
       const offset = 100 - pct;
       el.style.strokeDashoffset = offset;
       if (color) el.style.stroke = color;
+    }
+
+    // Suono breve e morbido per le notifiche informative (es. fine scansione)
+    function playChime() {
+      if (audioMuted) return;
+      try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const now = audioCtx.currentTime;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(660, now);
+        osc.frequency.setValueAtTime(880, now + 0.12);
+        gain.gain.setValueAtTime(0.18, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start(now);
+        osc.stop(now + 0.45);
+      } catch (e) {}
+    }
+
+    // Notifica informativa: suono morbido + voce
+    function notifyInfo(text) {
+      playChime();
+      speakText(text);
+    }
+
+    // Controlla le soglie e avvisa solo quando un valore entra in allarme,
+    // oppure dopo ALERT_REPEAT_MS se resta fuori dai limiti. Non ripete a ogni aggiornamento.
+    function checkLimits() {
+      const nowMs = Date.now();
+      const messages = [];
+      const dpfPct = telemetry.dpfSootGrams !== null ? (telemetry.dpfSootGrams / DPF_LIMIT_GRAMS) * 100 : null;
+
+      const checks = [
+        { key: 'coolant', active: telemetry.coolantTemp !== null && telemetry.coolantTemp > LIMITS.coolantHigh,
+          text: `Attenzione, temperatura refrigerante alta: ${Math.round(telemetry.coolantTemp)} gradi.` },
+        { key: 'batteryLow', active: telemetry.batteryVolt !== null && telemetry.batteryVolt < LIMITS.batteryLow,
+          text: `Attenzione, batteria scarica: ${telemetry.batteryVolt && telemetry.batteryVolt.toFixed(1)} volt.` },
+        { key: 'batteryHigh', active: telemetry.batteryVolt !== null && telemetry.batteryVolt > LIMITS.batteryHigh,
+          text: `Attenzione, tensione batteria troppo alta: ${telemetry.batteryVolt && telemetry.batteryVolt.toFixed(1)} volt.` },
+        { key: 'dpf', active: dpfPct !== null && dpfPct > LIMITS.dpfHighPct,
+          text: `Attenzione, filtro antiparticolato intasato al ${Math.round(dpfPct)} per cento.` },
+        { key: 'oilPressure', active: OIL_PRESSURE.did && telemetry.oilPressureBar !== null && telemetry.oilPressureBar < OIL_PRESSURE.minOk,
+          text: `Attenzione, pressione olio bassa: ${telemetry.oilPressureBar && telemetry.oilPressureBar.toFixed(1)} bar.` },
+      ];
+
+      for (const c of checks) {
+        if (c.active) {
+          const last = alertLastFired[c.key] || 0;
+          if (last === 0 || nowMs - last > ALERT_REPEAT_MS) {
+            messages.push(c.text);
+            alertLastFired[c.key] = nowMs;
+          }
+        } else {
+          alertLastFired[c.key] = 0;
+        }
+      }
+
+      if (messages.length > 0) {
+        playAlarm();
+        speakText(messages.join('. '));
+      }
     }
 
     // Sintesi Vocale in Italiano (SpeechSynthesis API)
@@ -568,6 +725,8 @@
         document.getElementById('val-oil-press').innerText = '-- bar';
         document.getElementById('sub-oil-press').innerText = OIL_PRESSURE.did ? noDataText() : 'NON CONFIGURATA';
       }
+
+      checkLimits();
     }
 
     // Motore di Simulazione
@@ -1014,6 +1173,7 @@
       }
 
       log(`SCAN completata: ${found} DID con risposta`, 'warn');
+      notifyInfo(`Scansione centralina strumenti completata. ${found} codici con risposta.`);
       showToast('Scansione completata', `${found} DID con risposta (vedi LOG)`, 'success');
       if (isConnected) startPolling();
     }
@@ -1057,6 +1217,7 @@
       }
 
       log(`SCAN motore completata: ${found} DID con risposta`, 'warn');
+      notifyInfo(`Scansione motore completata. ${found} codici con risposta.`);
       showToast('Scansione motore completata', `${found} DID con risposta (vedi LOG)`, 'success');
       if (isConnected) startPolling();
     }
